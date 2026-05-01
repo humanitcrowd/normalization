@@ -18,7 +18,7 @@ class Config:
         return {"watch_folder": str(self.watch_folder)}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Config":
+    def from_dict(cls, data: dict) -> Config:
         folder = data.get("watch_folder") or str(DEFAULT_WATCH_FOLDER)
         return cls(watch_folder=Path(folder).expanduser())
 

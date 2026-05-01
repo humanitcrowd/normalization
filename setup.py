@@ -1,5 +1,6 @@
 """py2app entry point. Build with: python setup.py py2app"""
 from pathlib import Path
+
 from setuptools import setup
 
 ROOT = Path(__file__).parent
@@ -12,11 +13,13 @@ ffmpeg_bin = RESOURCES / "ffmpeg"
 if ffmpeg_bin.exists():
     DATA_FILES.append(("", [str(ffmpeg_bin)]))
 
+icon_path = RESOURCES / "icon.icns"
+
 OPTIONS = {
     "argv_emulation": False,
     "packages": ["watchdog"],
     "includes": ["tkinter"],
-    "iconfile": str(RESOURCES / "icon.icns") if (RESOURCES / "icon.icns").exists() else None,
+    "iconfile": str(icon_path) if icon_path.exists() else None,
     "plist": {
         "CFBundleName": "Podcast Normalizer",
         "CFBundleDisplayName": "Podcast Normalizer",

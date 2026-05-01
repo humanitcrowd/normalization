@@ -7,13 +7,12 @@ drops, and DAW bounces that grow over time.
 """
 from __future__ import annotations
 
-import os
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -34,7 +33,7 @@ class WorkerCallbacks:
 
 
 class _Handler(FileSystemEventHandler):
-    def __init__(self, q: "queue.Queue[Path]", watch_root: Path) -> None:
+    def __init__(self, q: queue.Queue[Path], watch_root: Path) -> None:
         self.queue = q
         self.watch_root = watch_root
 
@@ -73,9 +72,9 @@ class FolderWatcher:
     def __init__(self, folder: Path, callbacks: WorkerCallbacks) -> None:
         self.folder = folder
         self.callbacks = callbacks
-        self._queue: "queue.Queue[Path]" = queue.Queue()
-        self._observer: Optional[Observer] = None
-        self._worker: Optional[threading.Thread] = None
+        self._queue: queue.Queue[Path] = queue.Queue()
+        self._observer: Observer | None = None
+        self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._files_processed = 0
         self._seen: set[Path] = set()

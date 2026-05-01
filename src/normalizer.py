@@ -6,9 +6,9 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
 
 from .log import get_logger
 
@@ -47,8 +47,8 @@ class Measurement:
 class Result:
     input_path: Path
     output_path: Path
-    measured_in: Optional[float]
-    measured_out: Optional[float]
+    measured_in: float | None
+    measured_out: float | None
 
 
 def is_normalized_name(path: Path) -> bool:
@@ -64,17 +64,12 @@ def should_process(path: Path) -> bool:
         return False
     if not is_supported(path):
         return False
-    if is_normalized_name(path):
-        return False
-    return True
+    return not is_normalized_name(path)
 
 
 def output_path_for(input_path: Path) -> Path:
     ext = input_path.suffix.lower()
-    if ext in LOSSY_TO_WAV:
-        out_ext = ".wav"
-    else:
-        out_ext = input_path.suffix
+    out_ext = ".wav" if ext in LOSSY_TO_WAV else input_path.suffix
     return input_path.with_name(f"{input_path.stem}{NORMALIZED_SUFFIX}{out_ext}")
 
 
@@ -89,7 +84,8 @@ def find_ffmpeg() -> str:
     if bundle_resources:
         candidates.append(Path(bundle_resources) / "ffmpeg")
     if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent.parent / "Resources" / "ffmpeg")
+        bundle_root = Path(sys.executable).resolve().parent.parent
+        candidates.append(bundle_root / "Resources" / "ffmpeg")
 
     repo_root = Path(__file__).resolve().parent.parent
     candidates.append(repo_root / "resources" / "ffmpeg")
@@ -102,13 +98,15 @@ def find_ffmpeg() -> str:
     found = which("ffmpeg")
     if found:
         return found
-    raise NormalizerError("ffmpeg not found (looked in app bundle, resources/, and PATH)")
+    raise NormalizerError(
+        "ffmpeg not found (looked in app bundle, resources/, and PATH)"
+    )
 
 
 _LOUDNORM_JSON_RE = re.compile(r"\{[^{}]*\"input_i\"[^{}]*\}", re.DOTALL)
 
 
-def _parse_loudnorm_json(stderr: str) -> Optional[Measurement]:
+def _parse_loudnorm_json(stderr: str) -> Measurement | None:
     match = _LOUDNORM_JSON_RE.search(stderr)
     if not match:
         return None
@@ -152,7 +150,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def measure(ffmpeg: str, input_path: Path) -> Optional[Measurement]:
+def measure(ffmpeg: str, input_path: Path) -> Measurement | None:
     cmd = [
         ffmpeg, "-hide_banner", "-nostats", "-i", str(input_path),
         "-af", f"loudnorm=I={LUFS_TARGET}:TP={TRUE_PEAK}:LRA={LRA}:print_format=json",
@@ -201,7 +199,7 @@ def apply_single_pass(ffmpeg: str, input_path: Path,
 _OUTPUT_I_RE = re.compile(r"Output Integrated:\s*(-?\d+(?:\.\d+)?)\s*LUFS")
 
 
-def _parse_output_lufs(stderr: str) -> Optional[float]:
+def _parse_output_lufs(stderr: str) -> float | None:
     m = _OUTPUT_I_RE.search(stderr)
     if not m:
         return None
@@ -217,8 +215,8 @@ def _log_ffmpeg_failure(stage: str, path: Path, stderr: str) -> None:
     log.error("ffmpeg %s failed for %s:\n%s", stage, path.name, tail)
 
 
-def normalize(input_path: Path, ffmpeg: Optional[str] = None,
-              progress: Optional[ProgressCb] = None) -> Result:
+def normalize(input_path: Path, ffmpeg: str | None = None,
+              progress: ProgressCb | None = None) -> Result:
     """Normalize a single file. Raises NormalizerError on failure."""
     log = get_logger()
     ffmpeg = ffmpeg or find_ffmpeg()

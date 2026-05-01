@@ -1,12 +1,12 @@
 """Tkinter UI for the Podcast Normalizer."""
 from __future__ import annotations
 
+import contextlib
 import queue
 import subprocess
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, scrolledtext, ttk
-from typing import Optional
 
 from . import config as cfg
 from . import normalizer
@@ -17,7 +17,7 @@ from .watcher import FolderWatcher, WorkerCallbacks
 class App:
     def __init__(self) -> None:
         self._config = cfg.load()
-        self._ui_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        self._ui_queue: queue.Queue[tuple[str, object]] = queue.Queue()
 
         self.root = tk.Tk()
         self.root.title("Podcast Normalizer")
@@ -28,7 +28,7 @@ class App:
         self._build_ui()
         self._wire_logging()
 
-        self.watcher: Optional[FolderWatcher] = None
+        self.watcher: FolderWatcher | None = None
         self._start_watching(self._config.watch_folder)
 
         # Pump the UI-thread queue
@@ -41,7 +41,8 @@ class App:
 
         header = ttk.Frame(self.root)
         header.pack(fill="x", **pad)
-        ttk.Label(header, text="Watching:", font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        ttk.Label(header, text="Watching:",
+                  font=("TkDefaultFont", 11, "bold")).pack(side="left")
         self.folder_var = tk.StringVar(value=str(self._config.watch_folder))
         ttk.Label(header, textvariable=self.folder_var,
                   font=("TkDefaultFont", 11)).pack(side="left", padx=(6, 0))
@@ -113,10 +114,8 @@ class App:
     def _open_folder(self) -> None:
         folder = self._config.watch_folder
         cfg.ensure_folder(folder)
-        try:
+        with contextlib.suppress(OSError):
             subprocess.Popen(["open", str(folder)])
-        except OSError:
-            pass
 
     def _change_folder(self) -> None:
         chosen = filedialog.askdirectory(

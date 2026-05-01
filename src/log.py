@@ -1,12 +1,13 @@
 """File log + in-memory buffer for the in-app log view."""
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections import deque
+from collections.abc import Callable
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Deque, Optional
 
 LOG_DIR = Path.home() / "Library" / "Logs" / "PodcastNormalizer"
 LOG_FILE = LOG_DIR / "normalizer.log"
@@ -14,8 +15,8 @@ MAX_BUFFER_LINES = 200
 
 
 class _BufferHandler(logging.Handler):
-    def __init__(self, buffer: Deque[str], buffer_lock: Lock,
-                 listener: Optional[Callable[[str], None]] = None) -> None:
+    def __init__(self, buffer: deque[str], buffer_lock: Lock,
+                 listener: Callable[[str], None] | None = None) -> None:
         super().__init__()
         self._buffer = buffer
         self._buffer_lock = buffer_lock
@@ -29,19 +30,17 @@ class _BufferHandler(logging.Handler):
         with self._buffer_lock:
             self._buffer.append(line)
         if self._listener is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._listener(line)
-            except Exception:
-                pass
 
 
 class LogStore:
     """Holds the rotating file handler and an in-memory ring buffer."""
 
     def __init__(self) -> None:
-        self._buffer: Deque[str] = deque(maxlen=MAX_BUFFER_LINES)
+        self._buffer: deque[str] = deque(maxlen=MAX_BUFFER_LINES)
         self._lock = Lock()
-        self._listener: Optional[Callable[[str], None]] = None
+        self._listener: Callable[[str], None] | None = None
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger("podcast_normalizer")
@@ -61,7 +60,7 @@ class LogStore:
             self._buf_handler.setFormatter(fmt)
             self.logger.addHandler(self._buf_handler)
 
-    def set_listener(self, listener: Optional[Callable[[str], None]]) -> None:
+    def set_listener(self, listener: Callable[[str], None] | None) -> None:
         self._listener = listener
 
     def _dispatch(self, line: str) -> None:
@@ -77,7 +76,7 @@ class LogStore:
             return "\n".join(self._buffer)
 
 
-_store: Optional[LogStore] = None
+_store: LogStore | None = None
 
 
 def get_store() -> LogStore:
