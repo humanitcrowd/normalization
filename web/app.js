@@ -52,9 +52,9 @@
   // Charlie scales linearly from CHARLIE_MIN_PX (at LUFS_MIN) to
   // CHARLIE_MAX_PX (at LUFS_MAX). Done via CSS transform on the wrapper
   // so the SVG itself can stay sharp at any size.
-  const CHARLIE_MIN_PX = 110;
-  const CHARLIE_MAX_PX = 200;
-  const CHARLIE_BASE_PX = 168;
+  const CHARLIE_MIN_PX = 80;
+  const CHARLIE_MAX_PX = 130;
+  const CHARLIE_BASE_PX = 120;
 
   function charlieScale(lufs) {
     const t = (lufs - LUFS_MIN) / (LUFS_MAX - LUFS_MIN);
@@ -86,24 +86,11 @@
     );
   }
 
-  // ── window chrome ──
-  function TrafficLights() {
-    const dot = (bg) => h("div", {
-      style: {
-        width: 12, height: 12, borderRadius: "50%", background: bg,
-        boxShadow: "inset 0 0 0 0.5px rgba(0,0,0,0.18)",
-      },
-    });
-    return h("div", { style: { display: "flex", gap: 8 } },
-      dot("#ff5f57"), dot("#febc2e"), dot("#28c840")
-    );
-  }
-
   function Section(props) {
     return h("div", {
       style: Object.assign({
-        paddingBottom: 14,
-        marginBottom: 14,
+        paddingBottom: 10,
+        marginBottom: 12,
         borderBottom: `1px solid ${THEME.borderSoft}`,
       }, props.style || {}),
     }, props.children);
@@ -329,56 +316,22 @@
     const charlieT = charlieScale(lufs);
 
     return h("div", {
+      onDragOver, onDragLeave, onDrop,
       style: {
         width: "100vw", height: "100vh",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: "transparent",
+        background: THEME.bg,
         color: THEME.text,
-        padding: 24,
+        display: "flex", flexDirection: "column",
+        padding: "16px 20px",
         boxSizing: "border-box",
+        outline: dragOver ? `2px solid ${THEME.accent}` : "none",
+        outlineOffset: -2,
+        transition: "outline 160ms ease",
       },
     },
-      // window
-      h("div", {
-        onDragOver, onDragLeave, onDrop,
-        style: {
-          width: 680, height: 540,
-          background: THEME.bg,
-          borderRadius: 12,
-          overflow: "hidden",
-          display: "flex", flexDirection: "column",
-          boxShadow: "0 24px 60px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(0,0,0,0.6)",
-          position: "relative",
-          outline: dragOver ? `2px solid ${THEME.accent}` : "none",
-          outlineOffset: dragOver ? -2 : 0,
-          transition: "outline 160ms ease",
-        },
-      },
-        // title bar
         h("div", {
           style: {
-            height: 38, flexShrink: 0,
-            background: THEME.titleBar,
-            borderBottom: `0.5px solid ${THEME.border}`,
-            display: "flex", alignItems: "center",
-            padding: "0 14px", position: "relative",
-          },
-        },
-          h(TrafficLights),
-          h("div", {
-            style: {
-              position: "absolute", inset: 0, display: "flex",
-              alignItems: "center", justifyContent: "center",
-              fontSize: 13, fontWeight: 600, color: THEME.textDim,
-              letterSpacing: 0.2, pointerEvents: "none",
-            },
-          }, "CharLUFS")
-        ),
-
-        // body
-        h("div", {
-          style: {
-            flex: 1, padding: "18px 22px 18px",
+            flex: 1,
             display: "flex", flexDirection: "column",
             minHeight: 0,
           },
@@ -433,24 +386,24 @@
           ),
 
           // ─── TARGET LUFS + CHARLIE ───
-          h(Section, { style: { paddingTop: 22, paddingBottom: 22 } },
-            h("div", { style: { display: "flex", gap: 28, alignItems: "center" } },
+          h(Section, { style: { paddingTop: 4, paddingBottom: 16 } },
+            h("div", { style: { display: "flex", gap: 20, alignItems: "center" } },
               // slider column
               h("div", { style: { flex: 1, minWidth: 0 } },
                 h("div", {
                   style: {
                     fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
-                    color: THEME.textFaint, fontWeight: 600, marginBottom: 10,
+                    color: THEME.textFaint, fontWeight: 600, marginBottom: 6,
                   },
                 }, "Target loudness"),
 
                 // readout
                 h("div", {
-                  style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 },
+                  style: { display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 },
                 },
                   h("span", {
                     style: {
-                      fontSize: 52, fontWeight: 600, lineHeight: 1,
+                      fontSize: 36, fontWeight: 600, lineHeight: 1,
                       fontVariantNumeric: "tabular-nums",
                       letterSpacing: -0.5,
                       fontFeatureSettings: '"tnum"',
@@ -459,7 +412,7 @@
                   }, lufs.toFixed(1)),
                   h("span", {
                     style: {
-                      fontSize: 14, color: THEME.textDim, fontWeight: 500,
+                      fontSize: 12, color: THEME.textDim, fontWeight: 500,
                       letterSpacing: 0.4,
                     },
                   }, "LUFS")
@@ -509,7 +462,7 @@
               // Charlie — scales with LUFS via CSS transform
               h("div", {
                 style: {
-                  width: CHARLIE_MAX_PX + 12, height: CHARLIE_MAX_PX + 12,
+                  width: CHARLIE_MAX_PX + 8, height: CHARLIE_MAX_PX + 8,
                   flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   position: "relative",
@@ -584,12 +537,12 @@
                 background: THEME.logBg,
                 border: `1px solid ${THEME.border}`,
                 borderRadius: 8,
-                padding: "10px 12px",
+                padding: "8px 12px",
                 fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
                 fontSize: 11.5,
-                lineHeight: 1.65,
+                lineHeight: 1.55,
                 color: THEME.logText,
-                flex: 1, minHeight: 88,
+                flex: 1, minHeight: 120,
                 overflowY: "auto",
                 fontVariantNumeric: "tabular-nums",
               },
@@ -610,7 +563,6 @@
             )))
           )
         )
-      )
     );
   }
 
