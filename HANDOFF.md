@@ -1,4 +1,4 @@
-# Podcast Normalizer — How to Use
+# CharLUFS — How to Use
 
 A small Mac app that takes any audio file you drop into one folder and writes a louder, evened-out copy next to it at the standard podcast loudness (-16 LUFS).
 
@@ -6,15 +6,15 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 
 ## Install (one time)
 
-1. Double-click `Podcast Normalizer.dmg` (the file I sent you).
+1. Double-click `CharLUFS.dmg` (the file I sent you).
 2. A window opens showing the app icon and an Applications folder. **Drag the app onto the Applications folder.** Done — close that window.
-3. Open your **Applications** folder, find **Podcast Normalizer**, **right-click it**, and choose **Open**. macOS will ask if you really want to open it — click **Open**. You only have to do this the first time.
+3. Open your **Applications** folder and double-click **CharLUFS** to launch it. macOS may ask once whether you want to open an app downloaded from the internet — click **Open**.
 4. From now on, you can launch it like any other app (Spotlight, Dock, double-click).
 
 ## Use it
 
-1. Launch **Podcast Normalizer**.
-2. The window shows a folder it's watching — by default `~/Podcast Normalize/` (the app creates it if it doesn't exist). Click **Open folder** to reveal it in Finder.
+1. Launch **CharLUFS**.
+2. The window shows a folder it's watching — by default `~/CharLUFS/` (the app creates it if it doesn't exist). Click **Open folder** to reveal it in Finder.
 3. **Drag any audio file into that folder.** Wait. The status line at the top of the app window will say things like:
    - `Waiting for episode42.wav to finish copying…`
    - `Processing: episode42.wav (pass 1/2)`

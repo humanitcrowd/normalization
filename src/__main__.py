@@ -1,4 +1,4 @@
-"""Launch the Podcast Normalizer app."""
+"""Launch the CharLUFS app."""
 from __future__ import annotations
 
 import sys

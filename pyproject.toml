@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "podcast-normalizer"
+name = "charlufs"
 version = "1.0.0"
-description = "macOS desktop app that loudness-normalizes audio files dropped into a watched folder."
+description = "CharLUFS — macOS desktop app that loudness-normalizes audio files dropped into a watched folder."
 requires-python = ">=3.11"
 dependencies = [
     "watchdog>=3.0.0",

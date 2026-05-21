@@ -5,9 +5,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-APP_SUPPORT = Path.home() / "Library" / "Application Support" / "PodcastNormalizer"
+APP_SUPPORT = Path.home() / "Library" / "Application Support" / "CharLUFS"
 CONFIG_PATH = APP_SUPPORT / "config.json"
-DEFAULT_WATCH_FOLDER = Path.home() / "Podcast Normalize"
+DEFAULT_WATCH_FOLDER = Path.home() / "CharLUFS"
 
 
 @dataclass

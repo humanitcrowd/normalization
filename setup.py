@@ -21,9 +21,9 @@ OPTIONS = {
     "includes": ["tkinter"],
     "iconfile": str(icon_path) if icon_path.exists() else None,
     "plist": {
-        "CFBundleName": "Podcast Normalizer",
-        "CFBundleDisplayName": "Podcast Normalizer",
-        "CFBundleIdentifier": "com.podcastnormalizer.app",
+        "CFBundleName": "CharLUFS",
+        "CFBundleDisplayName": "CharLUFS",
+        "CFBundleIdentifier": "com.charlufs.app",
         "CFBundleShortVersionString": "1.0.0",
         "CFBundleVersion": "1.0.0",
         "LSMinimumSystemVersion": "11.0",
@@ -37,7 +37,7 @@ OPTIONS = {k: v for k, v in OPTIONS.items() if v is not None}
 
 setup(
     app=APP,
-    name="Podcast Normalizer",
+    name="CharLUFS",
     data_files=DATA_FILES,
     options={"py2app": OPTIONS},
     setup_requires=["py2app"],

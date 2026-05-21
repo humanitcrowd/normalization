@@ -1,4 +1,4 @@
-"""Tkinter UI for the Podcast Normalizer."""
+"""Tkinter UI for CharLUFS."""
 from __future__ import annotations
 
 import contextlib
@@ -20,7 +20,7 @@ class App:
         self._ui_queue: queue.Queue[tuple[str, object]] = queue.Queue()
 
         self.root = tk.Tk()
-        self.root.title("Podcast Normalizer")
+        self.root.title("CharLUFS")
         self.root.geometry("640x460")
         self.root.minsize(560, 380)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)

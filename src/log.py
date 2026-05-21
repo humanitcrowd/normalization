@@ -9,7 +9,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Lock
 
-LOG_DIR = Path.home() / "Library" / "Logs" / "PodcastNormalizer"
+LOG_DIR = Path.home() / "Library" / "Logs" / "CharLUFS"
 LOG_FILE = LOG_DIR / "normalizer.log"
 MAX_BUFFER_LINES = 200
 
@@ -43,7 +43,7 @@ class LogStore:
         self._listener: Callable[[str], None] | None = None
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        self.logger = logging.getLogger("podcast_normalizer")
+        self.logger = logging.getLogger("charlufs")
         self.logger.setLevel(logging.INFO)
         self.logger.propagate = False
         if not self.logger.handlers:

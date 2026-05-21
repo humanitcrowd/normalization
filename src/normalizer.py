@@ -252,7 +252,7 @@ def normalize(input_path: Path, ffmpeg: str | None = None,
         _log_ffmpeg_failure("encode", input_path, stderr)
         raise NormalizerError(
             f"ffmpeg failed for {input_path.name} (see "
-            f"~/Library/Logs/PodcastNormalizer/normalizer.log)"
+            f"~/Library/Logs/CharLUFS/normalizer.log)"
         )
 
     measured_out = _parse_output_lufs(stderr)

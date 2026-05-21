@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Podcast Normalizer</string>
+    <string>CharLUFS</string>
     <key>CFBundleDisplayName</key>
-    <string>Podcast Normalizer</string>
+    <string>CharLUFS</string>
     <key>CFBundleIdentifier</key>
-    <string>com.podcastnormalizer.app</string>
+    <string>com.charlufs.app</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleExecutable</key>
-    <string>Podcast Normalizer</string>
+    <string>CharLUFS</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>

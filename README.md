@@ -1,4 +1,4 @@
-# Podcast Normalizer
+# CharLUFS
 
 A small macOS desktop app that loudness-normalizes any audio file dropped into a watched folder to **-16 LUFS integrated** (EBU R128). The producer drags a file in; the app drops a `_normalized` sibling next to it. No terminal, no Python, no Homebrew.
 
@@ -13,7 +13,7 @@ This repo is the source. The shipped artifact is a `.dmg` containing a self-cont
 │   ├── app.py             # Tk window + UI loop
 │   ├── watcher.py         # watchdog handler + size-stable debounce
 │   ├── normalizer.py      # ffmpeg two-pass loudnorm
-│   ├── config.py          # ~/Library/Application Support/PodcastNormalizer/config.json
+│   ├── config.py          # ~/Library/Application Support/CharLUFS/config.json
 │   └── log.py             # rotating file log + in-app ring buffer
 ├── resources/
 │   ├── ffmpeg             # bundled static binary (NOT committed; download at build time)
@@ -35,9 +35,9 @@ python -m src                   # run the app from source
 pytest                          # run the tests
 ```
 
-The end-to-end LUFS test will run if `ffmpeg` is on `PATH` or `resources/ffmpeg` exists; otherwise it skips.
+The end-to-end LUFS tests will run if `ffmpeg` is on `PATH` or `resources/ffmpeg` exists; otherwise they skip.
 
-## Build the `.app` and `.dmg`
+## Build the `.app` and `.dmg` (Developer ID signed + notarized)
 
 1. Drop a static universal2 macOS ffmpeg into `resources/ffmpeg`:
    ```bash
@@ -49,33 +49,41 @@ The end-to-end LUFS test will run if `ffmpeg` is on `PATH` or `resources/ffmpeg`
    ```bash
    python setup.py py2app
    ```
-   Output: `dist/Podcast Normalizer.app`.
-3. Sign:
-   - With Apple Developer ID:
-     ```bash
-     codesign --deep --force --options runtime \
-       --sign "Developer ID Application: …" "dist/Podcast Normalizer.app"
-     xcrun notarytool submit "Podcast Normalizer.app" --keychain-profile … --wait
-     xcrun stapler staple "dist/Podcast Normalizer.app"
-     ```
-   - Ad-hoc (free, but the user must right-click → Open the first time):
-     ```bash
-     codesign --deep --force --sign - "dist/Podcast Normalizer.app"
-     ```
-4. Wrap in a DMG:
+   Output: `dist/CharLUFS.app`.
+3. Sign with hardened runtime + timestamp:
+   ```bash
+   codesign --deep --force --options runtime --timestamp \
+     --sign "Developer ID Application: Your Name (TEAMID)" \
+     "dist/CharLUFS.app"
+   ```
+4. Notarize and staple:
+   ```bash
+   ditto -c -k --keepParent "dist/CharLUFS.app" "dist/CharLUFS.zip"
+   xcrun notarytool submit "dist/CharLUFS.zip" \
+     --keychain-profile "charlufs-profile" --wait
+   xcrun stapler staple "dist/CharLUFS.app"
+   ```
+5. Wrap in a DMG, sign + notarize that too:
    ```bash
    create-dmg \
-     --volname "Podcast Normalizer" \
+     --volname "CharLUFS" \
      --window-size 500 300 --icon-size 100 \
      --app-drop-link 380 150 \
-     "Podcast Normalizer.dmg" "dist/Podcast Normalizer.app"
+     "CharLUFS.dmg" "dist/CharLUFS.app"
+
+   codesign --force --timestamp \
+     --sign "Developer ID Application: Your Name (TEAMID)" \
+     "CharLUFS.dmg"
+   xcrun notarytool submit "CharLUFS.dmg" \
+     --keychain-profile "charlufs-profile" --wait
+   xcrun stapler staple "CharLUFS.dmg"
    ```
 
 ## Where things live at runtime
 
-- Watched folder: `~/Podcast Normalize/` (or whatever was last picked)
-- Config: `~/Library/Application Support/PodcastNormalizer/config.json`
-- Log: `~/Library/Logs/PodcastNormalizer/normalizer.log` (rotates at 1 MB, 3 backups)
+- Watched folder: `~/CharLUFS/` (or whatever was last picked)
+- Config: `~/Library/Application Support/CharLUFS/config.json`
+- Log: `~/Library/Logs/CharLUFS/normalizer.log` (rotates at 1 MB, 3 backups)
 
 ## Hardcoded choices
 
