@@ -251,7 +251,6 @@ class WebApp:
         try:
             WKWebView.performDragOperation_ = perform_drag
             self._drag_handler_installed = True
-            log.info("Native drag-and-drop handler installed")
         except Exception:
             log.exception("Failed to install native drag handler")
 
