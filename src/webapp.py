@@ -6,7 +6,7 @@ the job queue + normalizer + config; JS calls into Python via the
 into JS via dispatched CustomEvents.
 
 Drag-and-drop note: WKWebView delivers drop events to JS but strips the
-local path from the File objects (sandbox/privacy). To make `char backup`
+local path from the File objects (sandbox/privacy). To make `CharBackup`
 work we need real filesystem paths, so we hook the WKWebView's native
 `performDragOperation:` at startup and route NSURL paths into the queue.
 JS handles only the visual drag-over feedback.

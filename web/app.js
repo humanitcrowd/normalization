@@ -225,7 +225,7 @@
       }, detail),
       recoverable && h("button", {
         onClick: () => onRecover(item.path, item.name),
-        title: "Restore the original from char backup, deleting the normalized file",
+        title: "Restore the original from CharBackup, deleting the normalized file",
         style: {
           background: "transparent",
           border: `0.5px solid ${THEME.border}`,
@@ -356,7 +356,7 @@
       const ok = window.confirm(
         `Restore the original of "${name}"?\n\n` +
         `The normalized file currently at this location will be deleted ` +
-        `and replaced with the pristine copy from "char backup".`
+        `and replaced with the pristine copy from "CharBackup".`
       );
       if (!ok) return;
       if (window.pywebview && window.pywebview.api) {
@@ -603,7 +603,7 @@
                 },
                   h("div", null, "Drag audio files anywhere onto this window"),
                   h("div", { style: { fontSize: 11, color: THEME.textFaint } },
-                    "Originals are preserved in “char backup” next to each file"
+                    "Originals are preserved in “CharBackup” next to each file"
                   )
                 )
               : queue.map((item, i) => h(QueueItem, {

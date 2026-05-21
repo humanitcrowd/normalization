@@ -1,6 +1,6 @@
 # CharLUFS
 
-A small macOS desktop app that loudness-normalizes audio files dragged onto it. Drop one file or fifty, hit **Start**, and CharLUFS rewrites each file in place at your chosen LUFS target — the pristine original is preserved in a `char backup/` folder next to each file, so re-runs always start from the true original. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
+A small macOS desktop app that loudness-normalizes audio files dragged onto it. Drop one file or fifty, hit **Start**, and CharLUFS rewrites each file in place at your chosen LUFS target — the pristine original is preserved in a `CharBackup/` folder next to each file, so re-runs always start from the true original. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
 
 This repo is the source. The shipped artifact is a notarized `.zip` containing a self-contained `.app` bundle with `ffmpeg` baked in.
 
@@ -87,7 +87,7 @@ python scripts/build_icon.py
 
 ## Where things live at runtime
 
-- Pristine originals: `<dir>/char backup/<filename>` — created next to each file the first time it's normalized. CharLUFS never deletes these automatically.
+- Pristine originals: `<dir>/CharBackup/<filename>` — created next to each file the first time it's normalized. CharLUFS never deletes these automatically.
 - Processed-files history (for the Recover button across launches): `~/Library/Application Support/CharLUFS/processed.json`
 - Config: `~/Library/Application Support/CharLUFS/config.json` — `target_lufs` is written every time the slider moves but **ignored on launch**: the slider always resets to `DEFAULT_TARGET_LUFS` (-16) when the app starts. That's deliberate, so the producer doesn't pick up a stale value from a previous session.
 - Log: `~/Library/Logs/CharLUFS/normalizer.log` (rotates at 1 MB, 3 backups)
@@ -97,10 +97,10 @@ python scripts/build_icon.py
 - User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`. After it handles the drop, Python dispatches a `charlufs:drag_reset` event to clear the JS-side drag overlay (since WKWebView swallows the drop event before JS sees `drop`/`dragleave`).
 - User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max.
 - New files dropped while processing auto-join the running pool — free workers pick them up within ~100ms.
-- For each file, `normalize_in_place` either copies the current file into `char backup/` (first run) or treats the existing backup as the source of truth (re-run), processes from the backup, and atomic-replaces the file at the original path.
+- For each file, `normalize_in_place` either copies the current file into `CharBackup/` (first run) or treats the existing backup as the source of truth (re-run), processes from the backup, and atomic-replaces the file at the original path.
 - On success, an entry is upserted into `processed.json`. On next launch, those entries seed the Queue as `done` rows so the **Recover** button is available across sessions.
-- **Recover** (per row): delete the file at the original location, copy `char backup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
-- **Clear** (button): wipe all Pending + Done + Error rows from the queue and drop their entries from `processed.json`. Anything currently encoding is left alone. The on-disk `char backup/` folders are never touched — manual recover via Finder still works.
+- **Recover** (per row): delete the file at the original location, copy `CharBackup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
+- **Clear** (button): wipe all Pending + Done + Error rows from the queue and drop their entries from `processed.json`. Anything currently encoding is left alone. The on-disk `CharBackup/` folders are never touched — manual recover via Finder still works.
 
 ## Hardcoded choices
 
@@ -112,7 +112,7 @@ python scripts/build_icon.py
   - `.flac` → FLAC, sample_fmt s32
   - `.mp3` → libmp3lame 192 kbps CBR
   - `.m4a` / `.aac` → AAC 192 kbps
-  - `.ogg` / `.opus` / `.wma` → 24-bit WAV (we don't pretend to round-trip these losslessly). The pristine original keeps its lossy extension in `char backup/`.
+  - `.ogg` / `.opus` / `.wma` → 24-bit WAV (we don't pretend to round-trip these losslessly). The pristine original keeps its lossy extension in `CharBackup/`.
 - Output: same path as input (in-place replace). For lossy inputs the extension changes to `.wav` and the original `.ogg`/`.opus`/`.wma` file is removed from its location (still preserved in the backup folder).
 
 The default target and the slider range live in `src/config.py` (`DEFAULT_TARGET_LUFS`, `MIN_TARGET_LUFS`, `MAX_TARGET_LUFS`).

@@ -6,7 +6,7 @@ status (pending / processing / done / error) so the UI can render a queue
 with per-item feedback.
 
 Processing uses `normalizer.normalize_in_place`, so the pristine original
-is preserved in `<dir>/char backup/<name>` and the file at the dragged
+is preserved in `<dir>/CharBackup/<name>` and the file at the dragged
 location is replaced with the normalized output. Per-file work happens in
 disjoint directories with no shared state, so we run up to N jobs in
 parallel — ffmpeg loudnorm is single-threaded per process and a modern

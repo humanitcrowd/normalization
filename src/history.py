@@ -11,7 +11,7 @@ Schema (a single JSON list):
   {
     "path":         "/abs/path/to/file.wav",
     "name":         "file.wav",
-    "backup_path":  "/abs/path/to/char backup/file.wav",
+    "backup_path":  "/abs/path/to/CharBackup/file.wav",
     "processed_at": "2026-05-21T12:34:56",
     "target_lufs":  -16.0,
     "measured_in":  -22.3,

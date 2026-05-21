@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .log import get_logger
 
-BACKUP_DIR_NAME = "char backup"
+BACKUP_DIR_NAME = "CharBackup"
 
 LUFS_TARGET = -16.0
 TRUE_PEAK = -1.5
@@ -301,10 +301,10 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
                        progress: ProgressCb | None = None,
                        target_lufs: float = LUFS_TARGET) -> Result:
     """Normalize a file in place, preserving the pristine original in a sibling
-    `char backup/` folder.
+    `CharBackup/` folder.
 
     Behavior:
-      - If `<dir>/char backup/<name>` already exists, it is treated as the
+      - If `<dir>/CharBackup/<name>` already exists, it is treated as the
         source of truth (the pristine original). We re-process from there,
         overwriting whatever currently sits at `path`. This makes repeated
         normalizations idempotent w.r.t. the original audio — every run starts
