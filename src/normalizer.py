@@ -150,10 +150,11 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def measure(ffmpeg: str, input_path: Path) -> Measurement | None:
+def measure(ffmpeg: str, input_path: Path,
+            target_lufs: float = LUFS_TARGET) -> Measurement | None:
     cmd = [
         ffmpeg, "-hide_banner", "-nostats", "-i", str(input_path),
-        "-af", f"loudnorm=I={LUFS_TARGET}:TP={TRUE_PEAK}:LRA={LRA}:print_format=json",
+        "-af", f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:print_format=json",
         "-f", "null", "-",
     ]
     proc = _run(cmd)
@@ -164,9 +165,10 @@ def measure(ffmpeg: str, input_path: Path) -> Measurement | None:
 
 
 def apply_two_pass(ffmpeg: str, input_path: Path, output_path: Path,
-                   m: Measurement) -> tuple[bool, str]:
+                   m: Measurement,
+                   target_lufs: float = LUFS_TARGET) -> tuple[bool, str]:
     af = (
-        f"loudnorm=I={LUFS_TARGET}:TP={TRUE_PEAK}:LRA={LRA}:"
+        f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:"
         f"measured_I={m.input_i}:measured_TP={m.input_tp}:"
         f"measured_LRA={m.input_lra}:measured_thresh={m.input_thresh}:"
         f"offset={m.target_offset}:linear=true:print_format=summary"
@@ -183,8 +185,9 @@ def apply_two_pass(ffmpeg: str, input_path: Path, output_path: Path,
 
 
 def apply_single_pass(ffmpeg: str, input_path: Path,
-                      output_path: Path) -> tuple[bool, str]:
-    af = f"loudnorm=I={LUFS_TARGET}:TP={TRUE_PEAK}:LRA={LRA}:print_format=summary"
+                      output_path: Path,
+                      target_lufs: float = LUFS_TARGET) -> tuple[bool, str]:
+    af = f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:print_format=summary"
     cmd = [
         ffmpeg, "-hide_banner", "-y", "-i", str(input_path),
         "-af", af,
@@ -216,7 +219,8 @@ def _log_ffmpeg_failure(stage: str, path: Path, stderr: str) -> None:
 
 
 def normalize(input_path: Path, ffmpeg: str | None = None,
-              progress: ProgressCb | None = None) -> Result:
+              progress: ProgressCb | None = None,
+              target_lufs: float = LUFS_TARGET) -> Result:
     """Normalize a single file. Raises NormalizerError on failure."""
     log = get_logger()
     ffmpeg = ffmpeg or find_ffmpeg()
@@ -233,20 +237,22 @@ def normalize(input_path: Path, ffmpeg: str | None = None,
 
     if progress:
         progress(f"Processing: {input_path.name} (pass 1/2)")
-    log.info("Pass 1 (measure): %s", input_path.name)
-    measurement = measure(ffmpeg, input_path)
+    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, input_path.name)
+    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
 
     if measurement is not None:
         if progress:
             progress(f"Processing: {input_path.name} (pass 2/2)")
         log.info("Pass 2 (apply): %s", input_path.name)
-        ok, stderr = apply_two_pass(ffmpeg, input_path, output_path, measurement)
+        ok, stderr = apply_two_pass(ffmpeg, input_path, output_path,
+                                    measurement, target_lufs=target_lufs)
     else:
         log.warning("Pass-1 JSON missing for %s; falling back to single-pass",
                     input_path.name)
         if progress:
             progress(f"Processing: {input_path.name} (single-pass fallback)")
-        ok, stderr = apply_single_pass(ffmpeg, input_path, output_path)
+        ok, stderr = apply_single_pass(ffmpeg, input_path, output_path,
+                                       target_lufs=target_lufs)
 
     if not ok:
         _log_ffmpeg_failure("encode", input_path, stderr)

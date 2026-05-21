@@ -62,6 +62,29 @@ class App:
         ttk.Label(status, textvariable=self.status_var,
                   font=("TkDefaultFont", 11)).pack(side="left", padx=(6, 0))
 
+        target_frame = ttk.Frame(self.root)
+        target_frame.pack(fill="x", **pad)
+        ttk.Label(target_frame, text="Target loudness:",
+                  font=("TkDefaultFont", 11, "bold")).pack(side="left")
+        self.lufs_display_var = tk.StringVar(
+            value=f"{self._config.target_lufs:.1f} LUFS"
+        )
+        ttk.Label(target_frame, textvariable=self.lufs_display_var,
+                  font=("TkDefaultFont", 11)).pack(side="left", padx=(6, 12))
+
+        # tk.Scale (not ttk.Scale) supports `resolution` for 0.5 snapping
+        self.lufs_var = tk.DoubleVar(value=self._config.target_lufs)
+        self._lufs_save_timer: str | None = None
+        slider = tk.Scale(
+            target_frame, from_=cfg.MIN_TARGET_LUFS, to=cfg.MAX_TARGET_LUFS,
+            resolution=0.5, orient="horizontal", showvalue=False,
+            length=240, variable=self.lufs_var,
+            command=self._on_lufs_change,
+        )
+        slider.pack(side="left", fill="x", expand=True)
+        ttk.Label(target_frame, text="quieter ←   → louder",
+                  foreground="#888").pack(side="left", padx=(8, 0))
+
         counter = ttk.Frame(self.root)
         counter.pack(fill="x", **pad)
         self.counter_var = tk.StringVar(value="Files processed this session: 0")
@@ -101,7 +124,8 @@ class App:
             on_done=lambda r: self._ui_queue.put(("done", r)),
             on_error=lambda p, e: self._ui_queue.put(("error", (p, e))),
         )
-        self.watcher = FolderWatcher(folder, callbacks)
+        self.watcher = FolderWatcher(folder, callbacks,
+                                     target_lufs=self._config.target_lufs)
         self.watcher.start()
 
     def _stop_watching(self) -> None:
@@ -126,10 +150,36 @@ class App:
             return
         new_folder = Path(chosen)
         self._stop_watching()
-        self._config = cfg.Config(watch_folder=new_folder)
+        self._config = cfg.Config(
+            watch_folder=new_folder,
+            target_lufs=self._config.target_lufs,
+        )
         cfg.save(self._config)
         self._start_watching(new_folder)
         self._set_status("Idle")
+
+    def _on_lufs_change(self, raw_value: str) -> None:
+        """Slider callback: update display, watcher, and (debounced) config."""
+        try:
+            value = float(raw_value)
+        except ValueError:
+            return
+        snapped = cfg.clamp_lufs(value)
+        # Avoid recursive set storm if Tk already snapped to the same value
+        if abs(self.lufs_var.get() - snapped) > 1e-6:
+            self.lufs_var.set(snapped)
+        self.lufs_display_var.set(f"{snapped:.1f} LUFS")
+        self._config.target_lufs = snapped
+        if self.watcher is not None:
+            self.watcher.target_lufs = snapped
+        # Debounce disk writes — fire 500ms after the last drag tick
+        if self._lufs_save_timer is not None:
+            self.root.after_cancel(self._lufs_save_timer)
+        self._lufs_save_timer = self.root.after(500, self._save_config)
+
+    def _save_config(self) -> None:
+        self._lufs_save_timer = None
+        cfg.save(self._config)
 
     def _copy_log(self) -> None:
         text = get_store().full_buffer_text()

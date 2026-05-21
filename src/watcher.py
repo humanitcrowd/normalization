@@ -4,6 +4,14 @@ A worker thread services a queue. The watchdog handler enqueues new file paths;
 the worker waits for the file size to be stable for STABLE_SECONDS before
 handing it off to the normalizer. This handles slow Finder copies, AirDrop
 drops, and DAW bounces that grow over time.
+
+We use watchdog's PollingObserver (1s interval) rather than FSEvents because
+FSEvents has been observed to drop events in hardened-runtime py2app bundles.
+A 1-second poll is plenty for a podcast producer's workflow and ~0% CPU on
+the watched folder size we expect.
+
+The worker also runs a periodic re-scan of the directory as a safety net,
+so a file that somehow bypasses the observer still gets picked up.
 """
 from __future__ import annotations
 
@@ -15,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 from . import normalizer
 from .log import get_logger
@@ -23,6 +31,8 @@ from .log import get_logger
 STABLE_SECONDS = 2.0
 POLL_INTERVAL = 0.5
 MAX_STABLE_WAIT = 60 * 30  # 30 min ceiling for very slow copies
+OBSERVER_INTERVAL = 1.0
+RESCAN_INTERVAL = 5.0  # safety-net rescan of the watched folder
 
 
 @dataclass
@@ -69,12 +79,15 @@ class _Handler(FileSystemEventHandler):
 class FolderWatcher:
     """Watches a folder, debounces size, queues work, runs normalization."""
 
-    def __init__(self, folder: Path, callbacks: WorkerCallbacks) -> None:
+    def __init__(self, folder: Path, callbacks: WorkerCallbacks,
+                 target_lufs: float = -16.0) -> None:
         self.folder = folder
         self.callbacks = callbacks
+        self.target_lufs = target_lufs
         self._queue: queue.Queue[Path] = queue.Queue()
-        self._observer: Observer | None = None
+        self._observer: PollingObserver | None = None
         self._worker: threading.Thread | None = None
+        self._rescanner: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._files_processed = 0
         self._seen: set[Path] = set()
@@ -87,14 +100,18 @@ class FolderWatcher:
     def start(self) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
         self._stop_event.clear()
-        self._observer = Observer()
+        self._observer = PollingObserver(timeout=OBSERVER_INTERVAL)
         handler = _Handler(self._queue, self.folder)
         self._observer.schedule(handler, str(self.folder), recursive=False)
         self._observer.start()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
+        self._rescanner = threading.Thread(target=self._rescanner_loop,
+                                           daemon=True)
+        self._rescanner.start()
         self._scan_existing()
-        get_logger().info("Watching %s", self.folder)
+        get_logger().info("Watching %s (poll %.1fs, rescan %.1fs)",
+                          self.folder, OBSERVER_INTERVAL, RESCAN_INTERVAL)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -102,17 +119,30 @@ class FolderWatcher:
             self._observer.stop()
             self._observer.join(timeout=2.0)
             self._observer = None
-        # Worker is daemon; setting stop event will cause it to drop out next tick.
         self._worker = None
+        self._rescanner = None
 
     def _scan_existing(self) -> None:
-        """On startup, queue any pre-existing files that need processing."""
+        """Queue any files in the folder we haven't already seen.
+
+        Called once at startup and periodically by the rescanner as a
+        belt-and-suspenders backup to the polling observer.
+        """
         try:
             for entry in self.folder.iterdir():
                 if entry.is_file() and normalizer.should_process(entry):
+                    key = entry.resolve() if entry.exists() else entry
+                    with self._seen_lock:
+                        if key in self._seen:
+                            continue
                     self._queue.put(entry)
         except OSError:
             pass
+
+    def _rescanner_loop(self) -> None:
+        """Periodic safety-net rescan in case the observer drops an event."""
+        while not self._stop_event.wait(RESCAN_INTERVAL):
+            self._scan_existing()
 
     def _wait_stable(self, path: Path) -> bool:
         """Wait for file size to stop changing. Returns True when stable.
@@ -183,6 +213,7 @@ class FolderWatcher:
         try:
             result = normalizer.normalize(
                 path, progress=self.callbacks.on_status,
+                target_lufs=self.target_lufs,
             )
         except normalizer.NormalizerError as e:
             self.callbacks.on_error(path, e)
