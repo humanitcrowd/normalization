@@ -2,13 +2,15 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #1C1D20;
+  background: #0E0F11;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
+  background:
+    radial-gradient(120% 80% at 50% 0%, #2A2C32 0%, #15161A 55%, #0B0C0E 100%);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
 

@@ -53,7 +53,7 @@
   // CHARLIE_MAX_PX (at LUFS_MAX). Done via CSS transform on the wrapper
   // so the SVG itself can stay sharp at any size.
   const CHARLIE_MIN_PX = 80;
-  const CHARLIE_MAX_PX = 130;
+  const CHARLIE_MAX_PX = 140;
   const CHARLIE_BASE_PX = 120;
 
   function charlieScale(lufs) {
@@ -86,11 +86,24 @@
     );
   }
 
+  // ── window chrome ──
+  function TrafficLights() {
+    const dot = (bg) => h("div", {
+      style: {
+        width: 12, height: 12, borderRadius: "50%", background: bg,
+        boxShadow: "inset 0 0 0 0.5px rgba(0,0,0,0.18)",
+      },
+    });
+    return h("div", { style: { display: "flex", gap: 8 } },
+      dot("#ff5f57"), dot("#febc2e"), dot("#28c840")
+    );
+  }
+
   function Section(props) {
     return h("div", {
       style: Object.assign({
-        paddingBottom: 10,
-        marginBottom: 12,
+        paddingBottom: 14,
+        marginBottom: 14,
         borderBottom: `1px solid ${THEME.borderSoft}`,
       }, props.style || {}),
     }, props.children);
@@ -316,22 +329,39 @@
     const charlieT = charlieScale(lufs);
 
     return h("div", {
-      onDragOver, onDragLeave, onDrop,
       style: {
         width: "100vw", height: "100vh",
+        display: "flex", alignItems: "stretch", justifyContent: "stretch",
         background: THEME.bg,
         color: THEME.text,
-        display: "flex", flexDirection: "column",
-        padding: "16px 20px",
+        padding: 0,
         boxSizing: "border-box",
-        outline: dragOver ? `2px solid ${THEME.accent}` : "none",
-        outlineOffset: -2,
-        transition: "outline 160ms ease",
       },
     },
+      // window
+      h("div", {
+        onDragOver, onDragLeave, onDrop,
+        style: {
+          width: "100%", height: "100%",
+          background: THEME.bg,
+          overflow: "hidden",
+          display: "flex", flexDirection: "column",
+          position: "relative",
+          outline: dragOver ? `2px solid ${THEME.accent}` : "none",
+          outlineOffset: -2,
+          transition: "outline 160ms ease",
+        },
+      },
+        // title bar — hidden, OS provides the chrome
+        h("div", { style: { display: "none" } },
+          h(TrafficLights),
+          h("div", null, "CharLUFS")
+        ),
+
+        // body
         h("div", {
           style: {
-            flex: 1,
+            flex: 1, padding: "18px 22px 18px",
             display: "flex", flexDirection: "column",
             minHeight: 0,
           },
@@ -386,24 +416,24 @@
           ),
 
           // ─── TARGET LUFS + CHARLIE ───
-          h(Section, { style: { paddingTop: 4, paddingBottom: 16 } },
-            h("div", { style: { display: "flex", gap: 20, alignItems: "center" } },
+          h(Section, { style: { paddingTop: 6, paddingBottom: 14 } },
+            h("div", { style: { display: "flex", gap: 28, alignItems: "center" } },
               // slider column
               h("div", { style: { flex: 1, minWidth: 0 } },
                 h("div", {
                   style: {
                     fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
-                    color: THEME.textFaint, fontWeight: 600, marginBottom: 6,
+                    color: THEME.textFaint, fontWeight: 600, marginBottom: 10,
                   },
                 }, "Target loudness"),
 
                 // readout
                 h("div", {
-                  style: { display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 },
+                  style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 },
                 },
                   h("span", {
                     style: {
-                      fontSize: 36, fontWeight: 600, lineHeight: 1,
+                      fontSize: 38, fontWeight: 600, lineHeight: 1,
                       fontVariantNumeric: "tabular-nums",
                       letterSpacing: -0.5,
                       fontFeatureSettings: '"tnum"',
@@ -412,7 +442,7 @@
                   }, lufs.toFixed(1)),
                   h("span", {
                     style: {
-                      fontSize: 12, color: THEME.textDim, fontWeight: 500,
+                      fontSize: 14, color: THEME.textDim, fontWeight: 500,
                       letterSpacing: 0.4,
                     },
                   }, "LUFS")
@@ -462,7 +492,7 @@
               // Charlie — scales with LUFS via CSS transform
               h("div", {
                 style: {
-                  width: CHARLIE_MAX_PX + 8, height: CHARLIE_MAX_PX + 8,
+                  width: CHARLIE_MAX_PX + 12, height: CHARLIE_MAX_PX + 12,
                   flexShrink: 0,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   position: "relative",
@@ -537,10 +567,10 @@
                 background: THEME.logBg,
                 border: `1px solid ${THEME.border}`,
                 borderRadius: 8,
-                padding: "8px 12px",
+                padding: "10px 12px",
                 fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
                 fontSize: 11.5,
-                lineHeight: 1.55,
+                lineHeight: 1.65,
                 color: THEME.logText,
                 flex: 1, minHeight: 120,
                 overflowY: "auto",
@@ -563,6 +593,7 @@
             )))
           )
         )
+      )
     );
   }
 

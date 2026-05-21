@@ -217,9 +217,9 @@ class WebApp:
             "CharLUFS",
             url=str(index),
             js_api=Api(self),
-            width=640, height=520,
-            min_size=(540, 440),
-            background_color="#1C1D20",
+            width=720, height=580,
+            min_size=(620, 480),
+            background_color="#0E0F11",
             resizable=True,
         )
         self.window.events.closed += self._on_closed
