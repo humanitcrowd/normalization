@@ -227,14 +227,24 @@ class JobQueue:
         self._push_snapshot()
 
     def clear(self) -> None:
-        """Clear pending + error rows. Processing rows are left alone (mid-
-        encode), and done rows stay because they're the recoverable history
-        — dismiss those individually with the × button."""
+        """Clear everything that isn't actively encoding. Done rows are
+        wiped from both the UI and the persisted history (the on-disk
+        backup files themselves stay where they are — Recover via Finder
+        still works)."""
+        dropped_history_paths: list[str] = []
         with self._state_lock:
-            self._items = [
-                it for it in self._items
-                if it.status in ("processing", "done")
-            ]
+            kept: list[_Item] = []
+            for it in self._items:
+                if it.status == "processing":
+                    kept.append(it)
+                elif it.status == "done":
+                    dropped_history_paths.append(str(it.path))
+            self._items = kept
+        for p in dropped_history_paths:
+            try:
+                history.remove(p)
+            except Exception:
+                get_logger().exception("history.remove failed for %s", p)
         self._push_snapshot()
 
     def start(self) -> None:
