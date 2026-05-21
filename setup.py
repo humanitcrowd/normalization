@@ -6,7 +6,7 @@ from setuptools import setup
 ROOT = Path(__file__).parent
 RESOURCES = ROOT / "resources"
 
-APP = ["src/__main__.py"]
+APP = ["app_launcher.py"]
 
 DATA_FILES = []
 ffmpeg_bin = RESOURCES / "ffmpeg"
@@ -17,7 +17,7 @@ icon_path = RESOURCES / "icon.icns"
 
 OPTIONS = {
     "argv_emulation": False,
-    "packages": ["watchdog"],
+    "packages": ["watchdog", "src"],
     "includes": ["tkinter"],
     "iconfile": str(icon_path) if icon_path.exists() else None,
     "plist": {
