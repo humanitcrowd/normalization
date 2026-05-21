@@ -12,9 +12,21 @@ PROFILE="${NOTARY_PROFILE:-charlufs-profile}"
 APP="dist/CharLUFS.app"
 ENTITLEMENTS="resources/entitlements.plist"
 
+# Auto-activate venv if it exists and isn't already active
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "venv/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source venv/bin/activate
+fi
+
+PYTHON="${PYTHON:-python3}"
+command -v "$PYTHON" >/dev/null || {
+  echo "Error: $PYTHON not found. Activate the venv first: source venv/bin/activate" >&2
+  exit 1
+}
+
 # --- 1. Build ----------------------------------------------------------
 rm -rf build dist
-python setup.py py2app
+"$PYTHON" setup.py py2app
 
 if [ ! -d "$APP" ]; then
   echo "Build failed: $APP not found" >&2
