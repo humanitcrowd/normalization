@@ -1,0 +1,75 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0E0F11;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background:
+    radial-gradient(120% 80% at 50% 0%, #2A2C32 0%, #15161A 55%, #0B0C0E 100%);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Status-dot pulse */
+@keyframes charlufs-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--pulse, rgba(201,122,63,0.45)); }
+  70%  { box-shadow: 0 0 0 9px rgba(201,122,63,0); }
+  100% { box-shadow: 0 0 0 0 rgba(201,122,63,0); }
+}
+
+/* Charlie soft size transition with the slider */
+.charlie-wrap {
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: center;
+}
+
+/* Hide native scrollbar thumb on the log; keep it functional */
+.log-body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.log-body::-webkit-scrollbar-thumb {
+  background: rgba(237, 234, 227, 0.10);
+  border-radius: 4px;
+}
+.log-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(237, 234, 227, 0.18);
+}
+.log-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Slider input — invisible, captures clicks */
+.lufs-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid #C97A3F;
+  outline-offset: 2px;
+  border-radius: 4px;
+}

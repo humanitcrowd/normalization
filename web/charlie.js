@@ -1,0 +1,124 @@
+// Charlie — calm, well-drawn portrait of an English-setter-type dog.
+// No ear animation; he scales with the slider via a CSS transform on
+// the wrapping div instead.
+
+(function () {
+  const h = React.createElement;
+
+  function Charlie(props) {
+    const size = props.size || 168;
+    const COAT       = "#C97A3F";
+    const COAT_DEEP  = "#A85F2A";
+    const COAT_LITE  = "#DC9560";
+    const FUR        = "#F5EDDD";
+    const FUR_SHADOW = "#E6D6BA";
+    const NOSE       = "#3A2A23";
+    const EYE        = "#2A1E18";
+    const MOUTH      = "#4A352B";
+
+    return h("svg", {
+      viewBox: "0 0 220 240",
+      width: size,
+      height: size * (240 / 220),
+      style: { display: "block" },
+      "aria-label": "Charlie",
+    },
+      h("defs", null,
+        h("linearGradient", { id: "ch-ear", x1: "0", y1: "0", x2: "0", y2: "1" },
+          h("stop", { offset: "0%",  stopColor: COAT_LITE }),
+          h("stop", { offset: "55%", stopColor: COAT }),
+          h("stop", { offset: "100%", stopColor: COAT_DEEP })
+        ),
+        h("linearGradient", { id: "ch-crown", x1: "0.5", y1: "0", x2: "0.5", y2: "1" },
+          h("stop", { offset: "0%",   stopColor: COAT_LITE }),
+          h("stop", { offset: "100%", stopColor: COAT })
+        ),
+        h("radialGradient", { id: "ch-cheek", cx: "0.5", cy: "0.55", r: "0.6" },
+          h("stop", { offset: "0%",   stopColor: "#F2C9A8", stopOpacity: "0.55" }),
+          h("stop", { offset: "100%", stopColor: "#F2C9A8", stopOpacity: "0" })
+        ),
+        h("radialGradient", { id: "ch-face-shade", cx: "0.5", cy: "0.95", r: "0.6" },
+          h("stop", { offset: "0%",   stopColor: FUR_SHADOW, stopOpacity: "0.55" }),
+          h("stop", { offset: "100%", stopColor: FUR_SHADOW, stopOpacity: "0" })
+        )
+      ),
+      // Left ear
+      h("path", {
+        d: "M 76 70 C 56 70 38 84 30 110 C 24 130 26 156 36 178 C 46 198 64 208 80 200 C 90 194 94 178 94 158 C 94 134 92 110 90 94 C 88 80 84 70 76 70 Z",
+        fill: "url(#ch-ear)",
+      }),
+      h("path", {
+        d: "M 70 82 C 56 92 46 112 44 138 C 43 156 48 174 58 188",
+        stroke: COAT_DEEP, strokeWidth: "3", strokeLinecap: "round",
+        fill: "none", opacity: "0.35",
+      }),
+      // Right ear
+      h("path", {
+        d: "M 144 70 C 164 70 182 84 190 110 C 196 130 194 156 184 178 C 174 198 156 208 140 200 C 130 194 126 178 126 158 C 126 134 128 110 130 94 C 132 80 136 70 144 70 Z",
+        fill: "url(#ch-ear)",
+      }),
+      h("path", {
+        d: "M 150 82 C 164 92 174 112 176 138 C 177 156 172 174 162 188",
+        stroke: COAT_DEEP, strokeWidth: "3", strokeLinecap: "round",
+        fill: "none", opacity: "0.35",
+      }),
+      // Crown
+      h("path", {
+        d: "M 64 88 C 66 56 88 40 110 40 C 132 40 154 56 156 88 C 158 102 150 110 138 110 L 82 110 C 70 110 62 102 64 88 Z",
+        fill: "url(#ch-crown)",
+      }),
+      h("path", {
+        d: "M 106 56 C 108 70 108 84 106 100 L 114 100 C 112 84 112 70 114 56 Z",
+        fill: COAT_DEEP, opacity: "0.32",
+      }),
+      h("path", {
+        d: "M 80 52 C 96 44 124 44 140 52",
+        stroke: COAT_LITE, strokeWidth: "2.5", strokeLinecap: "round",
+        fill: "none", opacity: "0.55",
+      }),
+      // Face
+      h("path", {
+        d: "M 72 102 C 72 92 86 86 110 86 C 134 86 148 92 148 102 L 148 152 C 148 178 132 194 110 194 C 88 194 72 178 72 152 Z",
+        fill: FUR,
+      }),
+      h("ellipse", { cx: "110", cy: "180", rx: "34", ry: "14", fill: "url(#ch-face-shade)" }),
+      // Cheek glows
+      h("ellipse", { cx: "90",  cy: "154", rx: "13", ry: "9", fill: "url(#ch-cheek)" }),
+      h("ellipse", { cx: "130", cy: "154", rx: "13", ry: "9", fill: "url(#ch-cheek)" }),
+      // Brows
+      h("path", {
+        d: "M 84 130 q 8 -4 16 0",
+        stroke: COAT_DEEP, strokeWidth: "2.2", strokeLinecap: "round",
+        fill: "none", opacity: "0.55",
+      }),
+      h("path", {
+        d: "M 120 130 q 8 -4 16 0",
+        stroke: COAT_DEEP, strokeWidth: "2.2", strokeLinecap: "round",
+        fill: "none", opacity: "0.55",
+      }),
+      // Eyes
+      h("ellipse", { cx: "92",  cy: "142", rx: "5.4", ry: "6", fill: EYE }),
+      h("ellipse", { cx: "128", cy: "142", rx: "5.4", ry: "6", fill: EYE }),
+      h("circle",  { cx: "93.5",  cy: "140.2", r: "1.4", fill: "#fff" }),
+      h("circle",  { cx: "129.5", cy: "140.2", r: "1.4", fill: "#fff" }),
+      // Nose
+      h("path", {
+        d: "M 100 162 C 100 156 120 156 120 162 C 122 169 116 175 110 175 C 104 175 98 169 100 162 Z",
+        fill: NOSE,
+      }),
+      h("ellipse", { cx: "106", cy: "161", rx: "2.2", ry: "1.4", fill: "#6A4E40", opacity: "0.7" }),
+      h("path", { d: "M 110 174 v 7", stroke: NOSE, strokeWidth: "1.6", strokeLinecap: "round" }),
+      // Mouth
+      h("path", {
+        d: "M 110 181 q -6 6 -10 5",
+        stroke: MOUTH, strokeWidth: "1.8", strokeLinecap: "round", fill: "none",
+      }),
+      h("path", {
+        d: "M 110 181 q  6 6  10 5",
+        stroke: MOUTH, strokeWidth: "1.8", strokeLinecap: "round", fill: "none",
+      })
+    );
+  }
+
+  window.Charlie = Charlie;
+})();
