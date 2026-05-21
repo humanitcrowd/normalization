@@ -1,6 +1,6 @@
 # CharLUFS
 
-A small macOS desktop app that loudness-normalizes any audio file dropped into a watched folder. The producer drags a file in; the app drops a `_normalized` sibling next to it. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
+A small macOS desktop app that loudness-normalizes audio files dragged onto it. Drop one file or fifty, hit **Start**, and CharLUFS rewrites each file in place at your chosen LUFS target — the pristine original is preserved in a `char backup/` folder next to each file, so re-runs always start from the true original. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
 
 This repo is the source. The shipped artifact is a notarized `.zip` containing a self-contained `.app` bundle with `ffmpeg` baked in.
 
@@ -11,12 +11,15 @@ This repo is the source. The shipped artifact is a notarized `.zip` containing a
 ├── app_launcher.py        # top-level entry for the py2app bundle
 ├── src/
 │   ├── __main__.py        # dev entry (python -m src)
-│   ├── webapp.py          # pywebview UI (default) — drives the React frontend
-│   ├── app.py             # legacy Tk UI (CHARLUFS_TK=1 to use it)
-│   ├── watcher.py         # watchdog handler + size-stable debounce
-│   ├── normalizer.py      # ffmpeg two-pass loudnorm
+│   ├── webapp.py          # pywebview UI — drives the React frontend, installs
+│   │                      #   the native AppKit drag handler
+│   ├── jobqueue.py        # parallel job queue (drives normalize_in_place)
+│   ├── normalizer.py      # ffmpeg two-pass loudnorm + in-place + backup logic
 │   ├── config.py          # ~/Library/Application Support/CharLUFS/config.json
-│   └── log.py             # rotating file log + in-app ring buffer
+│   ├── log.py             # rotating file log + in-app ring buffer
+│   ├── watcher.py         # DEPRECATED — old folder-watcher mode, kept only
+│   │                      #   for tests; not wired into the app any more
+│   └── app.py             # DEPRECATED — old Tk UI, same caveat
 ├── web/                   # pywebview frontend (vanilla React, no build step)
 │   ├── index.html
 │   ├── app.js             # main UI
@@ -43,8 +46,7 @@ This repo is the source. The shipped artifact is a notarized `.zip` containing a
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt -e ".[test]"
-python -m src                   # run the app from source (pywebview UI)
-CHARLUFS_TK=1 python -m src     # legacy Tk UI (rollback)
+python -m src                   # run the app from source
 pytest                          # run the tests
 ```
 
@@ -85,9 +87,18 @@ python scripts/build_icon.py
 
 ## Where things live at runtime
 
-- Watched folder: `~/CharLUFS/` (or whatever was last picked)
-- Config: `~/Library/Application Support/CharLUFS/config.json`
+- Pristine originals: `<dir>/char backup/<filename>` — created next to each file the first time it's normalized. CharLUFS never deletes these automatically.
+- Processed-files history (for the Recover button across launches): `~/Library/Application Support/CharLUFS/processed.json`
+- Config (target LUFS): `~/Library/Application Support/CharLUFS/config.json`
 - Log: `~/Library/Logs/CharLUFS/normalizer.log` (rotates at 1 MB, 3 backups)
+
+## How processing works
+
+- User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`.
+- User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max.
+- For each file, `normalize_in_place` either copies the current file into `char backup/` (first run) or treats the existing backup as the source of truth (re-run), processes from the backup, and atomic-replaces the file at the original path.
+- On success, an entry is upserted into `processed.json`. On next launch, those entries seed the Queue as `done` rows so the **Recover** button is available across sessions.
+- Recover: delete the (post-normalize) file at the original location, copy `char backup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
 
 ## Hardcoded choices
 
@@ -99,8 +110,7 @@ python scripts/build_icon.py
   - `.flac` → FLAC, sample_fmt s32
   - `.mp3` → libmp3lame 192 kbps CBR
   - `.m4a` / `.aac` → AAC 192 kbps
-  - `.ogg` / `.opus` / `.wma` → 24-bit WAV (we don't pretend to round-trip these losslessly)
-- Output filename: `<stem>_normalized<ext>`, same folder as input
-- Files starting with `.`, files already containing `_normalized`, and unsupported extensions are skipped
+  - `.ogg` / `.opus` / `.wma` → 24-bit WAV (we don't pretend to round-trip these losslessly). The pristine original keeps its lossy extension in `char backup/`.
+- Output: same path as input (in-place replace). For lossy inputs the extension changes to `.wav` and the original `.ogg`/`.opus`/`.wma` file is removed from its location (still preserved in the backup folder).
 
 The default target and the slider range live in `src/config.py` (`DEFAULT_TARGET_LUFS`, `MIN_TARGET_LUFS`, `MAX_TARGET_LUFS`).

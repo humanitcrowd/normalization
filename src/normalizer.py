@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .log import get_logger
+
+BACKUP_DIR_NAME = "char backup"
 
 LUFS_TARGET = -16.0
 TRUE_PEAK = -1.5
@@ -218,10 +221,48 @@ def _log_ffmpeg_failure(stage: str, path: Path, stderr: str) -> None:
     log.error("ffmpeg %s failed for %s:\n%s", stage, path.name, tail)
 
 
+def _run_normalization(input_path: Path, output_path: Path, ffmpeg: str,
+                       display_name: str,
+                       progress: ProgressCb | None,
+                       target_lufs: float) -> tuple[float | None, float | None]:
+    """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs)."""
+    log = get_logger()
+
+    if progress:
+        progress(f"Measuring {display_name}")
+    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
+    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
+
+    if measurement is not None:
+        if progress:
+            progress(f"Normalizing {display_name}")
+        log.info("Pass 2 (apply): %s", display_name)
+        ok, stderr = apply_two_pass(ffmpeg, input_path, output_path,
+                                    measurement, target_lufs=target_lufs)
+    else:
+        log.warning("Pass-1 JSON missing for %s; falling back to single-pass",
+                    display_name)
+        if progress:
+            progress(f"Normalizing {display_name} (single-pass)")
+        ok, stderr = apply_single_pass(ffmpeg, input_path, output_path,
+                                       target_lufs=target_lufs)
+
+    if not ok:
+        _log_ffmpeg_failure("encode", input_path, stderr)
+        raise NormalizerError(
+            f"ffmpeg failed for {display_name} (see "
+            f"~/Library/Logs/CharLUFS/normalizer.log)"
+        )
+
+    measured_out = _parse_output_lufs(stderr)
+    measured_in = measurement.input_i if measurement else None
+    return measured_in, measured_out
+
+
 def normalize(input_path: Path, ffmpeg: str | None = None,
               progress: ProgressCb | None = None,
               target_lufs: float = LUFS_TARGET) -> Result:
-    """Normalize a single file. Raises NormalizerError on failure."""
+    """Normalize a single file to a `_normalized` sibling. Raises NormalizerError."""
     log = get_logger()
     ffmpeg = ffmpeg or find_ffmpeg()
 
@@ -230,51 +271,109 @@ def normalize(input_path: Path, ffmpeg: str | None = None,
 
     if output_path.exists():
         log.info("Output exists, will overwrite: %s", output_path.name)
-
     if input_ext in LOSSY_TO_WAV:
         log.info("Lossy input %s — writing 24-bit WAV to avoid re-encode loss",
                  input_path.name)
 
-    if progress:
-        progress(f"Processing: {input_path.name} (pass 1/2)")
-    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, input_path.name)
-    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
-
-    if measurement is not None:
-        if progress:
-            progress(f"Processing: {input_path.name} (pass 2/2)")
-        log.info("Pass 2 (apply): %s", input_path.name)
-        ok, stderr = apply_two_pass(ffmpeg, input_path, output_path,
-                                    measurement, target_lufs=target_lufs)
-    else:
-        log.warning("Pass-1 JSON missing for %s; falling back to single-pass",
-                    input_path.name)
-        if progress:
-            progress(f"Processing: {input_path.name} (single-pass fallback)")
-        ok, stderr = apply_single_pass(ffmpeg, input_path, output_path,
-                                       target_lufs=target_lufs)
-
-    if not ok:
-        _log_ffmpeg_failure("encode", input_path, stderr)
-        raise NormalizerError(
-            f"ffmpeg failed for {input_path.name} (see "
-            f"~/Library/Logs/CharLUFS/normalizer.log)"
-        )
-
-    measured_out = _parse_output_lufs(stderr)
-    measured_in = measurement.input_i if measurement else None
+    measured_in, measured_out = _run_normalization(
+        input_path, output_path, ffmpeg, input_path.name, progress, target_lufs,
+    )
 
     if measured_out is not None:
         log.info("Done: %s (out: %.1f LUFS%s)",
-                 output_path.name,
-                 measured_out,
+                 output_path.name, measured_out,
                  f", in: {measured_in:.1f} LUFS" if measured_in is not None else "")
     else:
         log.info("Done: %s", output_path.name)
 
     return Result(
-        input_path=input_path,
-        output_path=output_path,
-        measured_in=measured_in,
-        measured_out=measured_out,
+        input_path=input_path, output_path=output_path,
+        measured_in=measured_in, measured_out=measured_out,
+    )
+
+
+def backup_path_for(path: Path) -> Path:
+    """Where the pristine original of `path` lives (or will live)."""
+    return path.parent / BACKUP_DIR_NAME / path.name
+
+
+def normalize_in_place(path: Path, ffmpeg: str | None = None,
+                       progress: ProgressCb | None = None,
+                       target_lufs: float = LUFS_TARGET) -> Result:
+    """Normalize a file in place, preserving the pristine original in a sibling
+    `char backup/` folder.
+
+    Behavior:
+      - If `<dir>/char backup/<name>` already exists, it is treated as the
+        source of truth (the pristine original). We re-process from there,
+        overwriting whatever currently sits at `path`. This makes repeated
+        normalizations idempotent w.r.t. the original audio — every run starts
+        from the backup.
+      - If the backup doesn't exist yet, we copy the current file into the
+        backup folder first, then process from the backup.
+
+    For lossy containers (.ogg/.opus/.wma), output is a WAV in the original
+    location with the same stem (the original file with the lossy extension
+    is removed from its location since the pristine copy now lives in the
+    backup folder).
+    """
+    log = get_logger()
+    ffmpeg = ffmpeg or find_ffmpeg()
+
+    if not is_supported(path):
+        raise NormalizerError(f"unsupported format: {path.suffix}")
+    if not path.exists():
+        raise NormalizerError(f"file not found: {path}")
+
+    backup = backup_path_for(path)
+    backup.parent.mkdir(parents=True, exist_ok=True)
+
+    if backup.exists():
+        log.info("Using existing backup as source: %s", backup)
+    else:
+        shutil.copy2(path, backup)
+        log.info("Backed up original: %s -> %s", path.name, backup)
+
+    source_ext = backup.suffix.lower()
+    out_ext = ".wav" if source_ext in LOSSY_TO_WAV else backup.suffix
+    final_path = path.with_name(f"{path.stem}{out_ext}")
+
+    # Write to a hidden temp file in the same dir, then atomic-replace.
+    temp_path = path.with_name(f".{path.stem}_charlufs_tmp{out_ext}")
+    if temp_path.exists():
+        temp_path.unlink()
+
+    try:
+        measured_in, measured_out = _run_normalization(
+            backup, temp_path, ffmpeg, path.name, progress, target_lufs,
+        )
+    except Exception:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        raise
+
+    # Atomic-replace the destination
+    os.replace(str(temp_path), str(final_path))
+
+    # If extension changed (lossy -> .wav), the original file at the old
+    # extension is now stale; remove it (the pristine copy lives in backup).
+    if final_path != path and path.exists():
+        try:
+            path.unlink()
+        except OSError:
+            log.warning("Could not remove stale original at %s", path)
+
+    if measured_out is not None:
+        log.info("Done in place: %s (out: %.1f LUFS%s)",
+                 final_path.name, measured_out,
+                 f", in: {measured_in:.1f} LUFS" if measured_in is not None else "")
+    else:
+        log.info("Done in place: %s", final_path.name)
+
+    return Result(
+        input_path=path, output_path=final_path,
+        measured_in=measured_in, measured_out=measured_out,
     )

@@ -1,14 +1,13 @@
-"""Launch the CharLUFS app."""
+"""Launch the CharLUFS app (pywebview UI)."""
 from __future__ import annotations
 
 import sys
 
-from .app import App
+from .webapp import WebApp
 
 
 def main() -> int:
-    app = App()
-    app.run()
+    WebApp().run()
     return 0
 
 

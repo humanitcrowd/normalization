@@ -1,16 +1,24 @@
-"""Persisted user config: which folder to watch, target LUFS."""
+"""Persisted user config: target LUFS.
+
+`watch_folder` is no longer used by the app (drag-and-drop replaced the
+watch-folder workflow in 1.2.0) but the field is kept on the dataclass
+so the legacy modules (src/app.py, src/watcher.py) and their tests still
+import cleanly. It's preserved on round-trip but otherwise inert.
+"""
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_SUPPORT = Path.home() / "Library" / "Application Support" / "CharLUFS"
 CONFIG_PATH = APP_SUPPORT / "config.json"
-DEFAULT_WATCH_FOLDER = Path.home() / "CharLUFS"
 DEFAULT_TARGET_LUFS = -16.0
 MIN_TARGET_LUFS = -23.0
 MAX_TARGET_LUFS = -8.0
+
+# Legacy: kept for the deprecated watch-folder modules and their tests.
+DEFAULT_WATCH_FOLDER = Path.home() / "CharLUFS"
 
 
 def clamp_lufs(value: float) -> float:
@@ -19,25 +27,32 @@ def clamp_lufs(value: float) -> float:
     return max(MIN_TARGET_LUFS, min(MAX_TARGET_LUFS, snapped))
 
 
+def ensure_folder(folder: Path) -> Path:
+    """Legacy helper used by the deprecated watch-folder modules."""
+    folder = folder.expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 @dataclass
 class Config:
-    watch_folder: Path
     target_lufs: float = DEFAULT_TARGET_LUFS
+    watch_folder: Path = field(default_factory=lambda: DEFAULT_WATCH_FOLDER)
 
     def to_dict(self) -> dict:
         return {
-            "watch_folder": str(self.watch_folder),
             "target_lufs": self.target_lufs,
+            "watch_folder": str(self.watch_folder),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> Config:
-        folder = data.get("watch_folder") or str(DEFAULT_WATCH_FOLDER)
         try:
             target = clamp_lufs(float(data.get("target_lufs", DEFAULT_TARGET_LUFS)))
         except (TypeError, ValueError):
             target = DEFAULT_TARGET_LUFS
-        return cls(watch_folder=Path(folder).expanduser(), target_lufs=target)
+        folder = data.get("watch_folder") or str(DEFAULT_WATCH_FOLDER)
+        return cls(target_lufs=target, watch_folder=Path(folder).expanduser())
 
 
 def load() -> Config:
@@ -46,15 +61,9 @@ def load() -> Config:
             return Config.from_dict(json.loads(CONFIG_PATH.read_text()))
         except (json.JSONDecodeError, OSError):
             pass
-    return Config(watch_folder=DEFAULT_WATCH_FOLDER)
+    return Config()
 
 
 def save(cfg: Config) -> None:
     APP_SUPPORT.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(cfg.to_dict(), indent=2))
-
-
-def ensure_folder(folder: Path) -> Path:
-    folder = folder.expanduser()
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder

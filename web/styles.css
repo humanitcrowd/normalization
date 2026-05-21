@@ -32,19 +32,23 @@ body {
   transform-origin: center;
 }
 
-/* Hide native scrollbar thumb on the log; keep it functional */
-.log-body::-webkit-scrollbar {
+/* Hide native scrollbar thumb on the log + queue; keep it functional */
+.log-body::-webkit-scrollbar,
+.queue-body::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.log-body::-webkit-scrollbar-thumb {
+.log-body::-webkit-scrollbar-thumb,
+.queue-body::-webkit-scrollbar-thumb {
   background: rgba(237, 234, 227, 0.10);
   border-radius: 4px;
 }
-.log-body::-webkit-scrollbar-thumb:hover {
+.log-body::-webkit-scrollbar-thumb:hover,
+.queue-body::-webkit-scrollbar-thumb:hover {
   background: rgba(237, 234, 227, 0.18);
 }
-.log-body::-webkit-scrollbar-track {
+.log-body::-webkit-scrollbar-track,
+.queue-body::-webkit-scrollbar-track {
   background: transparent;
 }
 

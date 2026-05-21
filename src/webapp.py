@@ -1,13 +1,18 @@
 """pywebview-based UI for CharLUFS.
 
 Renders the web/ design bundle in a native WKWebView window. Python keeps
-the watcher + normalizer + config; JS calls into Python via the
-`pywebview.api.*` bridge and Python pushes status/log/folder events back
+the job queue + normalizer + config; JS calls into Python via the
+`pywebview.api.*` bridge and Python pushes status/log/queue events back
 into JS via dispatched CustomEvents.
+
+Drag-and-drop note: WKWebView delivers drop events to JS but strips the
+local path from the File objects (sandbox/privacy). To make `char backup`
+work we need real filesystem paths, so we hook the WKWebView's native
+`performDragOperation:` at startup and route NSURL paths into the queue.
+JS handles only the visual drag-over feedback.
 """
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
 import os
@@ -20,8 +25,8 @@ import webview
 
 from . import config as cfg
 from . import normalizer
+from .jobqueue import JobQueue, QueueCallbacks
 from .log import get_store
-from .watcher import FolderWatcher, WorkerCallbacks
 
 
 log = logging.getLogger("charlufs.webapp")
@@ -57,12 +62,13 @@ class Api:
     def get_initial_state(self) -> dict:
         snapshot = get_store().snapshot(80)
         return {
-            "watch_folder": str(self._app.config.watch_folder),
             "target_lufs": self._app.config.target_lufs,
             "log": list(snapshot),
+            "queue": self._app.queue.snapshot() if self._app.queue else [],
             "files_processed": (
-                self._app.watcher.files_processed if self._app.watcher else 0
+                self._app.queue.files_processed if self._app.queue else 0
             ),
+            "running": self._app.queue.is_running if self._app.queue else False,
             "min_lufs": cfg.MIN_TARGET_LUFS,
             "max_lufs": cfg.MAX_TARGET_LUFS,
         }
@@ -71,29 +77,34 @@ class Api:
         snapped = cfg.clamp_lufs(float(value))
         self._app.config.target_lufs = snapped
         self._app.schedule_save()
-        if self._app.watcher is not None:
-            self._app.watcher.target_lufs = snapped
+        if self._app.queue is not None:
+            self._app.queue.target_lufs = snapped
         return snapped
 
-    def open_folder(self) -> None:
-        path = str(self._app.config.watch_folder)
-        cfg.ensure_folder(self._app.config.watch_folder)
-        with contextlib.suppress(OSError):
-            subprocess.Popen(["open", path])
+    def start_processing(self) -> bool:
+        if self._app.queue is None:
+            return False
+        self._app.queue.start()
+        return self._app.queue.is_running
 
-    def change_folder(self) -> str | None:
-        win = self._app.window
-        if win is None:
-            return None
-        result = win.create_file_dialog(
-            webview.FOLDER_DIALOG,
-            directory=str(self._app.config.watch_folder),
-        )
-        if not result:
-            return None
-        new_folder = Path(result[0])
-        self._app.set_watch_folder(new_folder)
-        return str(new_folder)
+    def clear_queue(self) -> None:
+        if self._app.queue is not None:
+            self._app.queue.clear()
+
+    def remove_from_queue(self, index: int) -> None:
+        if self._app.queue is not None:
+            self._app.queue.remove(int(index))
+
+    def recover_file(self, path: str) -> bool:
+        if self._app.queue is None:
+            return False
+        return self._app.queue.recover(str(path))
+
+    def reveal_in_finder(self, path: str) -> None:
+        try:
+            subprocess.Popen(["open", "-R", path])
+        except OSError:
+            pass
 
     def copy_log(self, text: str) -> bool:
         """Clipboard fallback for when the JS clipboard API is blocked."""
@@ -109,9 +120,10 @@ class WebApp:
     def __init__(self) -> None:
         self.config = cfg.load()
         self.window: webview.Window | None = None
-        self.watcher: FolderWatcher | None = None
+        self.queue: JobQueue | None = None
         self._save_timer: threading.Timer | None = None
         self._save_lock = threading.Lock()
+        self._drag_handler_installed = False
 
     # ── Python -> JS push ────────────────────────────────────────────
 
@@ -127,10 +139,11 @@ class WebApp:
         except Exception:
             log.exception("evaluate_js failed for charlufs:%s", event)
 
-    # ── watcher wiring ───────────────────────────────────────────────
+    # ── queue wiring ─────────────────────────────────────────────────
 
-    def _make_callbacks(self) -> WorkerCallbacks:
-        return WorkerCallbacks(
+    def _make_callbacks(self) -> QueueCallbacks:
+        return QueueCallbacks(
+            on_queue=lambda items: self.push("queue", items),
             on_status=lambda s: self.push("status", {
                 "kind": "working", "text": s,
             }),
@@ -140,6 +153,7 @@ class WebApp:
                 "file": p.name,
                 "text": f"Couldn't process {p.name}: {e}",
             }),
+            on_idle=lambda: self.push("status", {"kind": "idle"}),
         )
 
     def _on_done(self, result: normalizer.Result) -> None:
@@ -149,31 +163,23 @@ class WebApp:
             "out_lufs": result.measured_out,
             "in_lufs": result.measured_in,
         })
-        if self.watcher is not None:
-            self.push("counter", self.watcher.files_processed)
+        if self.queue is not None:
+            self.push("counter", self.queue.files_processed)
 
-    def _start_watcher(self) -> None:
-        self.watcher = FolderWatcher(
-            self.config.watch_folder, self._make_callbacks(),
+    def _start_queue(self) -> None:
+        self.queue = JobQueue(
+            self._make_callbacks(),
             target_lufs=self.config.target_lufs,
         )
-        self.watcher.start()
-        self.push("folder", str(self.config.watch_folder))
 
-    def _stop_watcher(self) -> None:
-        if self.watcher is not None:
-            self.watcher.stop()
-            self.watcher = None
+    # ── files dropped from native handler ────────────────────────────
 
-    def set_watch_folder(self, folder: Path) -> None:
-        self._stop_watcher()
-        folder = cfg.ensure_folder(folder)
-        self.config = cfg.Config(
-            watch_folder=folder,
-            target_lufs=self.config.target_lufs,
-        )
-        cfg.save(self.config)
-        self._start_watcher()
+    def on_files_dropped(self, paths: list[str]) -> None:
+        if self.queue is None:
+            return
+        added = self.queue.add([Path(p) for p in paths])
+        if added:
+            log.info("Queued %d file(s) via drop", len(added))
 
     # ── debounced config save ────────────────────────────────────────
 
@@ -191,11 +197,66 @@ class WebApp:
         except Exception:
             log.exception("config save failed")
 
+    # ── native drag-and-drop hook ────────────────────────────────────
+
+    def _install_native_drag(self) -> None:
+        """Hook macOS-native drop on the WKWebView to capture file paths.
+
+        Without this, JS receives the `drop` event but `e.dataTransfer.files`
+        gives no usable paths (WKWebView strips them for sandbox reasons).
+        We monkey-patch WKWebView.performDragOperation_ to read NSURL paths
+        off the pasteboard and forward them to the queue.
+
+        Safe to call multiple times — we install only once.
+        """
+        if self._drag_handler_installed:
+            return
+        if sys.platform != "darwin":
+            return
+        try:
+            from WebKit import WKWebView  # type: ignore
+            from Foundation import NSURL  # type: ignore
+        except ImportError:
+            log.warning("PyObjC/WebKit not available — drag-and-drop disabled")
+            return
+
+        original = WKWebView.performDragOperation_
+        app = self
+
+        def perform_drag(self_, sender):  # noqa: N802 (ObjC naming)
+            try:
+                pb = sender.draggingPasteboard()
+                urls = pb.readObjectsForClasses_options_([NSURL.class__()], None)
+                if urls:
+                    paths: list[str] = []
+                    for u in urls:
+                        p = u.path()
+                        if p and not str(p).startswith(("http:", "https:")):
+                            paths.append(str(p))
+                    if paths:
+                        threading.Thread(
+                            target=app.on_files_dropped,
+                            args=(paths,),
+                            daemon=True,
+                        ).start()
+                        return True
+            except Exception:
+                log.exception("native performDragOperation handler failed")
+            return original(self_, sender)
+
+        try:
+            WKWebView.performDragOperation_ = perform_drag
+            self._drag_handler_installed = True
+            log.info("Native drag-and-drop handler installed")
+        except Exception:
+            log.exception("Failed to install native drag handler")
+
     # ── lifecycle ────────────────────────────────────────────────────
 
     def _on_closed(self) -> None:
         get_store().set_listener(None)
-        self._stop_watcher()
+        if self.queue is not None:
+            self.queue.stop()
         with self._save_lock:
             if self._save_timer is not None:
                 self._save_timer.cancel()
@@ -217,20 +278,19 @@ class WebApp:
             "CharLUFS",
             url=str(index),
             js_api=Api(self),
-            width=720, height=580,
-            min_size=(620, 480),
-            background_color="#0E0F11",
+            width=640, height=560,
+            min_size=(520, 440),
+            background_color="#1C1D20",
             resizable=True,
         )
         self.window.events.closed += self._on_closed
 
-        # Start the watcher only after the window is ready, so the first
-        # status push has a sink to land in.
         def _on_loaded():
             try:
-                self._start_watcher()
+                self._start_queue()
+                self._install_native_drag()
             except Exception:
-                log.exception("watcher failed to start")
+                log.exception("startup failed")
         self.window.events.loaded += _on_loaded
 
         webview.start()

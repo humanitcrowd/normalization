@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "charlufs"
-version = "1.1.0"
-description = "CharLUFS — macOS desktop app that loudness-normalizes audio files dropped into a watched folder."
+version = "1.2.0"
+description = "CharLUFS — macOS desktop app that loudness-normalizes audio files dragged onto it. Originals preserved in 'char backup'."
 requires-python = ">=3.10"
 
 [project.optional-dependencies]

@@ -6,19 +6,11 @@ bundled app. This launcher uses absolute imports instead.
 
 For development runs (`python -m src`), src/__main__.py is still the
 canonical entry point.
-
-CHARLUFS_TK=1 forces the legacy Tkinter UI for rollback purposes.
-The default UI is the pywebview build.
 """
-import os
 import sys
 
 
 def main() -> int:
-    if os.environ.get("CHARLUFS_TK") == "1":
-        from src.app import App
-        App().run()
-        return 0
     from src.webapp import WebApp
     WebApp().run()
     return 0

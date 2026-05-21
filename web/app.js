@@ -1,16 +1,22 @@
-// CharLUFS — main app, vanilla React (no JSX, no Babel runtime).
+// CharLUFS — drag-and-drop UI, vanilla React (no JSX, no Babel runtime).
 //
-// Communicates with the Python backend via the pywebview bridge:
+// JS calls Python via the pywebview bridge:
 //   await pywebview.api.get_initial_state()
 //   await pywebview.api.set_target_lufs(value)
-//   await pywebview.api.change_folder()
-//   await pywebview.api.open_folder()
+//   await pywebview.api.start_processing()
+//   await pywebview.api.clear_queue()
+//   await pywebview.api.remove_from_queue(index)
+//   await pywebview.api.reveal_in_finder(path)
 //   await pywebview.api.copy_log(text)
 // Python pushes events into JS via CustomEvents:
-//   charlufs:status { kind, file?, out_lufs?, in_lufs? }
-//   charlufs:log    "<formatted log line>"
-//   charlufs:folder "<path>"
+//   charlufs:status  { kind, file?, out_lufs?, in_lufs?, text? }
+//   charlufs:queue   [ { name, path, status, measured_in?, measured_out?, ... } ]
 //   charlufs:counter <n>
+//   charlufs:log     "<formatted log line>"
+//
+// Drop handling note: WKWebView strips file paths from the JS drop event,
+// so the actual queueing happens in Python via a native AppKit drag hook
+// (see src/webapp.py). JS only renders the drag-over visual.
 
 (function () {
   const h = React.createElement;
@@ -30,8 +36,8 @@
     idle: "rgba(237,234,227,0.45)",
     logBg: "#121316",
     logText: "#C9C5BB",
-    titleBar: "#2A2C31",
     accent: "#C97A3F",
+    dropTint: "rgba(201,122,63,0.10)",
   };
 
   const LUFS_MIN = -23;
@@ -39,7 +45,6 @@
   const LUFS_STEP = 0.5;
   const LUFS_DEFAULT = -16;
 
-  // Note: presets must fit the [LUFS_MIN, LUFS_MAX] range
   const PRESETS = [
     { value: -23, label: "EBU R128" },
     { value: -19, label: "Audible" },
@@ -49,11 +54,8 @@
     { value: -8,  label: "Loud as fuck" },
   ];
 
-  // Charlie scales linearly from CHARLIE_MIN_PX (at LUFS_MIN) to
-  // CHARLIE_MAX_PX (at LUFS_MAX). Done via CSS transform on the wrapper
-  // so the SVG itself can stay sharp at any size.
-  const CHARLIE_MIN_PX = 80;
-  const CHARLIE_MAX_PX = 140;
+  const CHARLIE_MIN_PX = 60;
+  const CHARLIE_MAX_PX = 100;
   const CHARLIE_BASE_PX = 120;
 
   function charlieScale(lufs) {
@@ -69,43 +71,22 @@
     return snapped;
   }
 
-  // ── tiny "Open" arrow icon ──
-  function ArrowIcon(props) {
-    return h("svg", {
-      width: 11, height: 11, viewBox: "0 0 11 11", fill: "none",
-      style: { marginLeft: 4 },
-    },
-      h("path", {
-        d: "M3 1 L8 5.5 L3 10",
-        stroke: props.color,
-        strokeWidth: "1.6",
-        strokeLinecap: "round",
-        strokeLinejoin: "round",
-        fill: "none",
-      })
-    );
-  }
-
-  // ── window chrome ──
-  function TrafficLights() {
-    const dot = (bg) => h("div", {
-      style: {
-        width: 12, height: 12, borderRadius: "50%", background: bg,
-        boxShadow: "inset 0 0 0 0.5px rgba(0,0,0,0.18)",
-      },
-    });
-    return h("div", { style: { display: "flex", gap: 8 } },
-      dot("#ff5f57"), dot("#febc2e"), dot("#28c840")
-    );
-  }
-
   function Section(props) {
     return h("div", {
       style: Object.assign({
-        paddingBottom: 14,
-        marginBottom: 14,
+        paddingBottom: 10,
+        marginBottom: 12,
         borderBottom: `1px solid ${THEME.borderSoft}`,
       }, props.style || {}),
+    }, props.children);
+  }
+
+  function SectionLabel(props) {
+    return h("div", {
+      style: {
+        fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
+        color: THEME.textFaint, fontWeight: 600, marginBottom: 6,
+      },
     }, props.children);
   }
 
@@ -121,19 +102,16 @@
         style: {
           position: "absolute", inset: 0, borderRadius: "50%",
           background: props.color,
-          boxShadow: props.pulsing ? `0 0 0 0 ${props.color}66` : "none",
           animation: props.pulsing ? "charlufs-pulse 1.4s ease-out infinite" : "none",
         },
       })
     );
   }
 
-  // ── slider ──
   function LufsSlider(props) {
     const { value, onChange, onDragStart, onDragEnd } = props;
     const pct = ((value - LUFS_MIN) / (LUFS_MAX - LUFS_MIN)) * 100;
     return h("div", { style: { position: "relative", height: 26 } },
-      // track
       h("div", {
         style: {
           position: "absolute", left: 0, right: 0, top: "50%",
@@ -143,7 +121,6 @@
           border: `0.5px solid ${THEME.borderSoft}`,
         },
       }),
-      // fill
       h("div", {
         style: {
           position: "absolute", left: 0, top: "50%",
@@ -154,7 +131,6 @@
           transition: "width 80ms ease",
         },
       }),
-      // preset tick marks
       ...PRESETS.map((p) => {
         const tp = ((p.value - LUFS_MIN) / (LUFS_MAX - LUFS_MIN)) * 100;
         return h("div", {
@@ -168,7 +144,6 @@
           },
         });
       }),
-      // thumb
       h("div", {
         style: {
           position: "absolute", left: `${pct}%`, top: "50%",
@@ -179,7 +154,6 @@
           pointerEvents: "none",
         },
       }),
-      // invisible native input
       h("input", {
         type: "range",
         min: LUFS_MIN, max: LUFS_MAX, step: LUFS_STEP,
@@ -189,6 +163,90 @@
         onTouchStart: onDragStart, onTouchEnd: onDragEnd,
         className: "lufs-input",
       })
+    );
+  }
+
+  // ── Queue item row ──
+  function QueueItem(props) {
+    const { item, index, onRemove, onReveal, onRecover } = props;
+    const status = item.status;
+
+    let dotColor = THEME.idle;
+    let pulsing = false;
+    let detail = "";
+
+    if (status === "pending") {
+      dotColor = THEME.textFaint;
+      detail = "Pending";
+    } else if (status === "processing") {
+      dotColor = THEME.accent;
+      pulsing = true;
+      detail = "Processing…";
+    } else if (status === "done") {
+      dotColor = THEME.success;
+      detail = item.measured_out != null
+        ? `${item.measured_out.toFixed(1)} LUFS`
+        : "Done";
+    } else if (status === "error") {
+      dotColor = THEME.error;
+      detail = item.error || "Error";
+    }
+
+    const removable = status !== "processing";
+    const recoverable = status === "done" && item.recoverable;
+
+    return h("div", {
+      style: {
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "6px 8px",
+        borderRadius: 6,
+        background: status === "processing" ? "rgba(201,122,63,0.06)" : "transparent",
+      },
+    },
+      h(StatusDot, { color: dotColor, pulsing }),
+      h("div", {
+        onClick: () => onReveal(item.path),
+        title: item.path,
+        style: {
+          flex: 1, minWidth: 0,
+          fontSize: 12.5, color: THEME.text,
+          fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+          fontVariantNumeric: "tabular-nums",
+          textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap",
+          cursor: "pointer",
+        },
+      }, item.name),
+      h("div", {
+        style: {
+          fontSize: 11, color: THEME.textDim,
+          fontVariantNumeric: "tabular-nums",
+          flexShrink: 0,
+        },
+      }, detail),
+      recoverable && h("button", {
+        onClick: () => onRecover(item.path, item.name),
+        title: "Restore the original from char backup, deleting the normalized file",
+        style: {
+          background: "transparent",
+          border: `0.5px solid ${THEME.border}`,
+          borderRadius: 4,
+          padding: "2px 8px",
+          color: THEME.textDim, fontSize: 10.5, cursor: "pointer",
+          fontWeight: 600, letterSpacing: 0.3,
+          textTransform: "uppercase",
+        },
+      }, "Recover"),
+      removable && h("button", {
+        onClick: () => onRemove(index),
+        title: status === "done"
+          ? "Forget this entry (file stays as-is, backup is kept on disk)"
+          : "Remove from queue",
+        style: {
+          background: "transparent", border: "none", padding: "2px 6px",
+          color: THEME.textFaint, fontSize: 13, cursor: "pointer",
+          lineHeight: 1,
+        },
+      }, "×")
     );
   }
 
@@ -205,17 +263,16 @@
 
   // ── App ──
   function App() {
-    const [folder, setFolder] = useState("~/CharLUFS");
     const [lufs, setLufs] = useState(LUFS_DEFAULT);
-    const [dragging, setDragging] = useState(false);
     const [status, setStatus] = useState({ kind: "idle" });
+    const [queue, setQueue] = useState([]);
     const [processed, setProcessed] = useState(0);
     const [log, setLog] = useState([]);
     const [dragOver, setDragOver] = useState(false);
     const [copyFlash, setCopyFlash] = useState(false);
+    const dragCounter = useRef(0);
     const logRef = useRef(null);
 
-    // Pull initial state from Python; subscribe to push events
     useEffect(() => {
       let cancelled = false;
       (async () => {
@@ -223,8 +280,8 @@
         try {
           const state = await window.pywebview.api.get_initial_state();
           if (cancelled) return;
-          if (state.watch_folder) setFolder(state.watch_folder);
           if (typeof state.target_lufs === "number") setLufs(state.target_lufs);
+          if (Array.isArray(state.queue)) setQueue(state.queue);
           if (Array.isArray(state.log)) {
             setLog(state.log.map((line) => parseLogLine(line)));
           }
@@ -238,34 +295,29 @@
       return () => { cancelled = true; };
     }, []);
 
-    // Push-event listeners (Python -> JS)
     useEffect(() => {
       const onStatus = (e) => setStatus(e.detail);
-      const onLog = (e) => {
-        const line = e.detail;
-        setLog((l) => l.concat([parseLogLine(line)]).slice(-200));
-      };
-      const onFolder = (e) => setFolder(e.detail);
+      const onQueue = (e) => setQueue(e.detail || []);
       const onCounter = (e) => setProcessed(e.detail);
+      const onLog = (e) => {
+        setLog((l) => l.concat([parseLogLine(e.detail)]).slice(-200));
+      };
       window.addEventListener("charlufs:status", onStatus);
-      window.addEventListener("charlufs:log", onLog);
-      window.addEventListener("charlufs:folder", onFolder);
+      window.addEventListener("charlufs:queue", onQueue);
       window.addEventListener("charlufs:counter", onCounter);
+      window.addEventListener("charlufs:log", onLog);
       return () => {
         window.removeEventListener("charlufs:status", onStatus);
-        window.removeEventListener("charlufs:log", onLog);
-        window.removeEventListener("charlufs:folder", onFolder);
+        window.removeEventListener("charlufs:queue", onQueue);
         window.removeEventListener("charlufs:counter", onCounter);
+        window.removeEventListener("charlufs:log", onLog);
       };
     }, []);
 
-    // Autoscroll log
     useEffect(() => {
       if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
     }, [log]);
 
-    // Push slider changes to Python (the snap also happens here so the UI
-    // always shows the snapped value)
     function onLufsChange(raw) {
       const v = snapLufs(parseFloat(raw));
       setLufs(v);
@@ -274,15 +326,35 @@
       }
     }
 
-    async function onOpenFolder() {
+    async function onStart() {
       if (window.pywebview && window.pywebview.api) {
-        await window.pywebview.api.open_folder();
+        await window.pywebview.api.start_processing();
       }
     }
-    async function onChangeFolder() {
+    async function onClear() {
       if (window.pywebview && window.pywebview.api) {
-        await window.pywebview.api.change_folder();
-        // folder is also pushed back via charlufs:folder, but pull it now for instant feedback
+        await window.pywebview.api.clear_queue();
+      }
+    }
+    async function onRemove(index) {
+      if (window.pywebview && window.pywebview.api) {
+        await window.pywebview.api.remove_from_queue(index);
+      }
+    }
+    async function onReveal(path) {
+      if (window.pywebview && window.pywebview.api) {
+        await window.pywebview.api.reveal_in_finder(path);
+      }
+    }
+    async function onRecover(path, name) {
+      const ok = window.confirm(
+        `Restore the original of "${name}"?\n\n` +
+        `The normalized file currently at this location will be deleted ` +
+        `and replaced with the pristine copy from "char backup".`
+      );
+      if (!ok) return;
+      if (window.pywebview && window.pywebview.api) {
+        await window.pywebview.api.recover_file(path);
       }
     }
     async function onCopyLog() {
@@ -290,7 +362,6 @@
       try {
         await navigator.clipboard.writeText(text);
       } catch (e) {
-        // fallback via Python
         if (window.pywebview && window.pywebview.api) {
           await window.pywebview.api.copy_log(text);
         }
@@ -299,313 +370,330 @@
       setTimeout(() => setCopyFlash(false), 1200);
     }
 
-    // Drag-over affordance — pywebview generally does not deliver native
-    // file drops to the page, but the visual cue is still useful when the
-    // user drags from Finder over the window edge.
-    function onDragOver(e) { e.preventDefault(); setDragOver(true); }
-    function onDragLeave(e) { e.preventDefault(); setDragOver(false); }
-    function onDrop(e) { e.preventDefault(); setDragOver(false); }
+    // dragenter/dragleave fire on every child crossing; use a counter so
+    // the visual overlay only goes away when we've truly left the window.
+    function onDragEnter(e) {
+      e.preventDefault();
+      dragCounter.current += 1;
+      if (dragCounter.current === 1) setDragOver(true);
+    }
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragCounter.current = Math.max(0, dragCounter.current - 1);
+      if (dragCounter.current === 0) setDragOver(false);
+    }
+    function onDragOver(e) { e.preventDefault(); }
+    function onDrop(e) {
+      e.preventDefault();
+      dragCounter.current = 0;
+      setDragOver(false);
+      // Actual file paths are routed in via Python's native AppKit handler;
+      // JS receives the event purely for the visual cue.
+    }
 
-    // ── status info ──
     const statusInfo = useMemo(() => {
-      switch (status.kind) {
-        case "idle":        return { dot: THEME.idle,    text: "Idle" };
-        case "waiting":     return { dot: THEME.accent,  text: `Waiting for ${status.file}…` };
-        case "measuring":   return { dot: THEME.accent,  text: `Measuring ${status.file}` };
-        case "normalizing": return { dot: THEME.accent,  text: `Normalizing ${status.file}` };
-        case "working":     return { dot: THEME.accent,  text: status.text || "Working…" };
-        case "done":        return {
-          dot: THEME.success,
-          text: status.out_lufs != null
-            ? `Done: ${status.file} (${status.out_lufs.toFixed(1)} LUFS)`
-            : `Done: ${status.file}`,
+      const pending = queue.filter((q) => q.status === "pending").length;
+      const processing = queue.filter((q) => q.status === "processing").length;
+      if (dragOver) return { dot: THEME.accent, text: "Drop to add to queue", pulsing: true };
+      if (processing > 0) {
+        const others = pending > 0 ? `, ${pending} pending` : "";
+        return {
+          dot: THEME.accent,
+          text: `Processing ${processing} file${processing === 1 ? "" : "s"}${others}`,
+          pulsing: true,
         };
-        case "error":       return { dot: THEME.error,   text: status.text || `Couldn't process ${status.file || ""}` };
-        default:            return { dot: THEME.idle,    text: "Idle" };
       }
-    }, [status]);
+      if (pending > 0) {
+        return { dot: THEME.textFaint, text: `${pending} file${pending === 1 ? "" : "s"} ready — click Start`, pulsing: false };
+      }
+      switch (status.kind) {
+        case "done":
+          return {
+            dot: THEME.success,
+            text: status.out_lufs != null
+              ? `Last done: ${status.file} (${status.out_lufs.toFixed(1)} LUFS)`
+              : `Last done: ${status.file}`,
+            pulsing: false,
+          };
+        case "error":
+          return { dot: THEME.error, text: status.text || "Error", pulsing: false };
+        default:
+          return { dot: THEME.idle, text: "Idle — drop audio files anywhere to queue them", pulsing: false };
+      }
+    }, [status, queue, dragOver]);
 
-    const isWorking = ["waiting", "measuring", "normalizing", "working"].includes(status.kind);
+    const canStart = queue.some((q) => q.status === "pending");
+    const isProcessing = queue.some((q) => q.status === "processing");
     const charlieT = charlieScale(lufs);
 
     return h("div", {
+      onDragEnter, onDragOver, onDragLeave, onDrop,
       style: {
         width: "100vw", height: "100vh",
-        display: "flex", alignItems: "stretch", justifyContent: "stretch",
         background: THEME.bg,
         color: THEME.text,
-        padding: 0,
+        display: "flex", flexDirection: "column",
+        padding: "16px 20px",
         boxSizing: "border-box",
+        position: "relative",
+        outline: dragOver ? `3px solid ${THEME.accent}` : "none",
+        outlineOffset: -3,
+        transition: "outline 120ms ease",
       },
     },
-      // window
-      h("div", {
-        onDragOver, onDragLeave, onDrop,
+      // Drag overlay (only while dragging)
+      dragOver && h("div", {
         style: {
-          width: "100%", height: "100%",
-          background: THEME.bg,
-          overflow: "hidden",
-          display: "flex", flexDirection: "column",
-          position: "relative",
-          outline: dragOver ? `2px solid ${THEME.accent}` : "none",
-          outlineOffset: -2,
-          transition: "outline 160ms ease",
+          position: "absolute", inset: 0,
+          background: THEME.dropTint,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, fontWeight: 600, color: THEME.accent,
+          pointerEvents: "none",
+          zIndex: 10,
+        },
+      }, "Drop audio files to queue"),
+
+      // Body
+      h("div", {
+        style: {
+          flex: 1, display: "flex", flexDirection: "column", minHeight: 0,
         },
       },
-        // title bar — hidden, OS provides the chrome
-        h("div", { style: { display: "none" } },
-          h(TrafficLights),
-          h("div", null, "CharLUFS")
+        // ─── TARGET LUFS + CHARLIE ───
+        h(Section, { style: { paddingBottom: 12 } },
+          h("div", { style: { display: "flex", gap: 16, alignItems: "center" } },
+            h("div", { style: { flex: 1, minWidth: 0 } },
+              h(SectionLabel, null, "Target loudness"),
+              h("div", {
+                style: { display: "flex", alignItems: "baseline", gap: 6, marginBottom: 8 },
+              },
+                h("span", {
+                  style: {
+                    fontSize: 30, fontWeight: 600, lineHeight: 1,
+                    fontVariantNumeric: "tabular-nums",
+                    letterSpacing: -0.5,
+                    color: THEME.text,
+                  },
+                }, lufs.toFixed(1)),
+                h("span", {
+                  style: {
+                    fontSize: 12, color: THEME.textDim, fontWeight: 500,
+                    letterSpacing: 0.4,
+                  },
+                }, "LUFS")
+              ),
+              h(LufsSlider, {
+                value: lufs,
+                onChange: onLufsChange,
+                onDragStart: () => {},
+                onDragEnd: () => {},
+              }),
+              h("div", {
+                style: {
+                  display: "flex", justifyContent: "space-between", marginTop: 6,
+                },
+              }, ...PRESETS.map((p) => {
+                const active = Math.abs(p.value - lufs) < 0.25;
+                return h("button", {
+                  key: p.value,
+                  onClick: () => onLufsChange(p.value),
+                  title: `Set to ${p.value} LUFS`,
+                  style: {
+                    background: "transparent", border: "none", padding: "2px 0",
+                    cursor: "pointer",
+                    color: active ? THEME.accent : THEME.textFaint,
+                    fontSize: 10, fontWeight: active ? 600 : 500,
+                    fontVariantNumeric: "tabular-nums",
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 1,
+                  },
+                },
+                  h("span", { style: { fontFamily: '"SF Mono", ui-monospace, Menlo, monospace' } }, p.value),
+                  h("span", { style: { fontSize: 9, letterSpacing: 0.3 } }, p.label)
+                );
+              }))
+            ),
+            // Charlie
+            h("div", {
+              style: {
+                width: CHARLIE_MAX_PX + 8, height: CHARLIE_MAX_PX + 8,
+                flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              },
+            },
+              h("div", {
+                className: "charlie-wrap",
+                style: { transform: `scale(${charlieT})` },
+              },
+                h(window.Charlie, { size: CHARLIE_BASE_PX })
+              )
+            )
+          )
         ),
 
-        // body
+        // ─── FILE QUEUE ───
         h("div", {
           style: {
-            flex: 1, padding: "18px 22px 18px",
+            display: "flex", flexDirection: "column",
+            flex: 1, minHeight: 0, marginBottom: 12,
+          },
+        },
+          h("div", {
+            style: {
+              display: "flex", justifyContent: "space-between",
+              alignItems: "baseline", marginBottom: 6,
+            },
+          },
+            h(SectionLabel, null, `Queue${queue.length ? ` · ${queue.length}` : ""}`),
+            h("div", { style: { display: "flex", gap: 8, alignItems: "center" } },
+              queue.length > 0 && h("button", {
+                onClick: onClear,
+                disabled: isProcessing && queue.every((q) => q.status === "processing"),
+                style: {
+                  background: "transparent", border: "none", padding: 0,
+                  color: THEME.textDim, fontSize: 11,
+                  cursor: "pointer", fontWeight: 500,
+                },
+              }, "Clear"),
+              h("button", {
+                onClick: onStart,
+                disabled: !canStart || isProcessing,
+                style: {
+                  background: (canStart && !isProcessing) ? THEME.accent : THEME.bgRaised,
+                  border: `0.5px solid ${(canStart && !isProcessing) ? THEME.accent : THEME.border}`,
+                  borderRadius: 6,
+                  padding: "5px 14px",
+                  color: (canStart && !isProcessing) ? "#FFFFFF" : THEME.textFaint,
+                  fontSize: 12, fontWeight: 600,
+                  cursor: (canStart && !isProcessing) ? "pointer" : "default",
+                  letterSpacing: 0.3,
+                },
+              }, isProcessing ? "Running…" : "Start")
+            )
+          ),
+          h("div", {
+            style: {
+              background: THEME.bgSunken,
+              border: `1px solid ${THEME.border}`,
+              borderRadius: 8,
+              padding: 6,
+              flex: 1, minHeight: 100,
+              overflowY: "auto",
+              display: "flex", flexDirection: "column",
+              gap: 2,
+            },
+            className: "queue-body",
+          },
+            queue.length === 0
+              ? h("div", {
+                  style: {
+                    flex: 1,
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "center",
+                    color: THEME.textFaint, fontSize: 12.5,
+                    textAlign: "center", padding: "20px 16px",
+                    gap: 4,
+                  },
+                },
+                  h("div", null, "Drag audio files anywhere onto this window"),
+                  h("div", { style: { fontSize: 11, color: THEME.textFaint } },
+                    "Originals are preserved in “char backup” next to each file"
+                  )
+                )
+              : queue.map((item, i) => h(QueueItem, {
+                  key: item.path + i,
+                  item, index: i,
+                  onRemove, onReveal, onRecover,
+                }))
+          )
+        ),
+
+        // ─── STATUS ───
+        h(Section, null,
+          h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
+            h(StatusDot, { color: statusInfo.dot, pulsing: statusInfo.pulsing }),
+            h("div", {
+              style: {
+                fontSize: 13, fontWeight: 500, color: THEME.text,
+                flex: 1,
+                textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap",
+              },
+            }, statusInfo.text),
+            h("div", {
+              style: {
+                fontSize: 12, color: THEME.textDim,
+                fontVariantNumeric: "tabular-nums",
+              },
+            }, `${processed} file${processed === 1 ? "" : "s"} this session`)
+          )
+        ),
+
+        // ─── LOG ───
+        h("div", {
+          style: {
             display: "flex", flexDirection: "column",
             minHeight: 0,
           },
         },
-          // ─── WATCHING ROW ───
-          h(Section, null,
-            h("div", {
-              style: {
-                display: "flex", alignItems: "baseline", gap: 10,
-                justifyContent: "space-between",
-              },
-            },
-              h("div", null,
-                h("div", {
-                  style: {
-                    fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
-                    color: THEME.textFaint, fontWeight: 600, marginBottom: 6,
-                  },
-                }, "Watching"),
-                h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-                  h("div", {
-                    style: {
-                      fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-                      fontSize: 14, color: THEME.text, fontWeight: 500,
-                      fontVariantNumeric: "tabular-nums",
-                    },
-                  }, folder),
-                  h("button", {
-                    onClick: onOpenFolder,
-                    style: {
-                      background: "transparent", border: "none", padding: 0,
-                      color: THEME.accent, fontSize: 12, fontWeight: 600,
-                      cursor: "pointer",
-                      display: "inline-flex", alignItems: "center",
-                    },
-                  }, "Open", h(ArrowIcon, { color: THEME.accent }))
-                )
-              ),
-              h("button", {
-                onClick: onChangeFolder,
-                style: {
-                  background: THEME.bgRaised,
-                  border: `0.5px solid ${THEME.border}`,
-                  borderRadius: 6,
-                  padding: "5px 12px",
-                  color: THEME.text,
-                  fontSize: 12, fontWeight: 500,
-                  cursor: "pointer",
-                },
-              }, "Change folder…")
-            )
-          ),
-
-          // ─── TARGET LUFS + CHARLIE ───
-          h(Section, { style: { paddingTop: 6, paddingBottom: 14 } },
-            h("div", { style: { display: "flex", gap: 28, alignItems: "center" } },
-              // slider column
-              h("div", { style: { flex: 1, minWidth: 0 } },
-                h("div", {
-                  style: {
-                    fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
-                    color: THEME.textFaint, fontWeight: 600, marginBottom: 10,
-                  },
-                }, "Target loudness"),
-
-                // readout
-                h("div", {
-                  style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 14 },
-                },
-                  h("span", {
-                    style: {
-                      fontSize: 38, fontWeight: 600, lineHeight: 1,
-                      fontVariantNumeric: "tabular-nums",
-                      letterSpacing: -0.5,
-                      fontFeatureSettings: '"tnum"',
-                      color: THEME.text,
-                    },
-                  }, lufs.toFixed(1)),
-                  h("span", {
-                    style: {
-                      fontSize: 14, color: THEME.textDim, fontWeight: 500,
-                      letterSpacing: 0.4,
-                    },
-                  }, "LUFS")
-                ),
-
-                h(LufsSlider, {
-                  value: lufs,
-                  onChange: onLufsChange,
-                  onDragStart: () => setDragging(true),
-                  onDragEnd: () => setDragging(false),
-                }),
-
-                // presets
-                h("div", {
-                  style: {
-                    display: "flex", justifyContent: "space-between",
-                    marginTop: 10,
-                  },
-                }, ...PRESETS.map((p) => {
-                  const active = Math.abs(p.value - lufs) < 0.25;
-                  return h("button", {
-                    key: p.value,
-                    onClick: () => onLufsChange(p.value),
-                    style: {
-                      background: "transparent",
-                      border: "none",
-                      padding: "2px 0",
-                      cursor: "pointer",
-                      color: active ? THEME.accent : THEME.textFaint,
-                      fontSize: 10.5,
-                      fontWeight: active ? 600 : 500,
-                      fontVariantNumeric: "tabular-nums",
-                      display: "flex", flexDirection: "column",
-                      alignItems: "center", gap: 2,
-                      transition: "color 200ms ease",
-                    },
-                    title: `Set to ${p.value} LUFS`,
-                  },
-                    h("span", { style: { fontFamily: '"SF Mono", ui-monospace, Menlo, monospace' } },
-                      p.value
-                    ),
-                    h("span", { style: { fontSize: 9.5, letterSpacing: 0.3 } }, p.label)
-                  );
-                }))
-              ),
-
-              // Charlie — scales with LUFS via CSS transform
-              h("div", {
-                style: {
-                  width: CHARLIE_MAX_PX + 12, height: CHARLIE_MAX_PX + 12,
-                  flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  position: "relative",
-                },
-              },
-                h("div", {
-                  className: "charlie-wrap",
-                  style: { transform: `scale(${charlieT})` },
-                },
-                  h(window.Charlie, { size: CHARLIE_BASE_PX })
-                )
-              )
-            )
-          ),
-
-          // ─── STATUS ───
-          h(Section, null,
-            h("div", { style: { display: "flex", alignItems: "center", gap: 12 } },
-              h(StatusDot, { color: statusInfo.dot, pulsing: isWorking }),
-              h("div", {
-                style: {
-                  fontSize: 14, fontWeight: 600, color: THEME.text,
-                  fontVariantNumeric: "tabular-nums",
-                  flex: 1,
-                  textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap",
-                },
-              }, dragOver ? "Drop here to normalize" : statusInfo.text),
-              h("div", {
-                style: {
-                  fontSize: 12, color: THEME.textDim,
-                  fontVariantNumeric: "tabular-nums",
-                },
-              }, `${processed} file${processed === 1 ? "" : "s"} this session`)
-            )
-          ),
-
-          // ─── LOG ───
           h("div", {
             style: {
-              marginTop: 0,
-              display: "flex", flexDirection: "column",
-              flex: 1, minHeight: 0,
+              display: "flex", justifyContent: "space-between",
+              alignItems: "baseline", marginBottom: 4,
             },
           },
-            h("div", {
+            h(SectionLabel, null, "Log"),
+            h("button", {
+              onClick: onCopyLog,
               style: {
-                display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                marginBottom: 6,
+                background: "transparent", border: "none", padding: 0,
+                color: copyFlash ? THEME.accent : THEME.textDim,
+                fontSize: 11, cursor: "pointer",
+                fontWeight: 500,
+                transition: "color 160ms ease",
               },
+            }, copyFlash ? "Copied" : "Copy log")
+          ),
+          h("div", {
+            ref: logRef,
+            className: "log-body",
+            style: {
+              background: THEME.logBg,
+              border: `1px solid ${THEME.border}`,
+              borderRadius: 8,
+              padding: "8px 12px",
+              fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+              fontSize: 11.5,
+              lineHeight: 1.55,
+              color: THEME.logText,
+              height: 100,
+              overflowY: "auto",
+              fontVariantNumeric: "tabular-nums",
             },
-              h("div", {
-                style: {
-                  fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6,
-                  color: THEME.textFaint, fontWeight: 600,
-                },
-              }, "Log"),
-              h("button", {
-                onClick: onCopyLog,
-                style: {
-                  background: "transparent", border: "none", padding: 0,
-                  color: copyFlash ? THEME.accent : THEME.textDim,
-                  fontSize: 11, cursor: "pointer",
-                  fontWeight: 500,
-                  transition: "color 160ms ease",
-                },
-              }, copyFlash ? "Copied" : "Copy log")
-            ),
-            h("div", {
-              ref: logRef,
-              className: "log-body",
+          }, ...log.map((entry, i) => h("div", {
+            key: i,
+            style: { display: "flex", gap: 10, alignItems: "flex-start" },
+          },
+            h("span", {
               style: {
-                background: THEME.logBg,
-                border: `1px solid ${THEME.border}`,
-                borderRadius: 8,
-                padding: "10px 12px",
-                fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-                fontSize: 11.5,
-                lineHeight: 1.65,
-                color: THEME.logText,
-                flex: 1, minHeight: 120,
-                overflowY: "auto",
-                fontVariantNumeric: "tabular-nums",
+                width: 6, height: 6, borderRadius: "50%", marginTop: 7, flexShrink: 0,
+                background: entry.kind === "done" ? THEME.success
+                          : entry.kind === "error" ? THEME.error
+                          : "transparent",
               },
-            }, ...log.map((entry, i) => h("div", {
-              key: i,
-              style: { display: "flex", gap: 10, alignItems: "flex-start" },
-            },
-              h("span", {
-                style: {
-                  width: 6, height: 6, borderRadius: "50%", marginTop: 7, flexShrink: 0,
-                  background: entry.kind === "done" ? THEME.success
-                            : entry.kind === "error" ? THEME.error
-                            : "transparent",
-                },
-              }),
-              h("span", { style: { color: THEME.textFaint, flexShrink: 0 } }, entry.ts),
-              h("span", null, entry.text)
-            )))
-          )
+            }),
+            h("span", { style: { color: THEME.textFaint, flexShrink: 0 } }, entry.ts),
+            h("span", null, entry.text)
+          )))
         )
       )
     );
   }
 
-  // ── log parsing ──
-  // We accept either raw log lines from Python ("2026-05-21 11:50:25 INFO ...")
-  // or pre-shaped objects. The line format is intentionally simple.
   function parseLogLine(line) {
     if (line && typeof line === "object" && line.text != null) {
       return line;
     }
     const s = String(line);
-    // ISO timestamp at the start
     const m = s.match(/^(\d{4}-\d{2}-\d{2}\s+)?(\d{2}:\d{2}:\d{2})\s+(\w+)\s+(.*)$/);
     if (!m) return { ts: nowStamp(), kind: "info", text: s };
     const ts = m[2];
@@ -614,7 +702,7 @@
     let kind = "info";
     if (level === "ERROR") kind = "error";
     else if (level === "WARNING") kind = "warning";
-    else if (text.startsWith("Done:")) kind = "done";
+    else if (text.startsWith("Done")) kind = "done";
     return { ts, kind, text };
   }
 
@@ -624,7 +712,6 @@
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   }
 
-  // mount
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(h(App));
 })();
