@@ -6,9 +6,9 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 
 ## Install (one time)
 
-1. Double-click `CharLUFS.dmg` (the file I sent you).
-2. A window opens showing the app icon and an Applications folder. **Drag the app onto the Applications folder.** Done — close that window.
-3. Open your **Applications** folder and double-click **CharLUFS** to launch it. macOS may ask once whether you want to open an app downloaded from the internet — click **Open**.
+1. Double-click `CharLUFS.zip` (the file I sent you). macOS will unzip it and leave **CharLUFS** sitting next to it — usually in your Downloads folder.
+2. **Drag CharLUFS into your Applications folder.** (Open Finder → Applications, then drop it in.)
+3. Double-click **CharLUFS** in Applications to launch it. macOS may ask once whether you want to open an app downloaded from the internet — click **Open**.
 4. From now on, you can launch it like any other app (Spotlight, Dock, double-click).
 
 ## Use it

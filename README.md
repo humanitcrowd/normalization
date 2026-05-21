@@ -2,7 +2,7 @@
 
 A small macOS desktop app that loudness-normalizes any audio file dropped into a watched folder. The producer drags a file in; the app drops a `_normalized` sibling next to it. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
 
-This repo is the source. The shipped artifact is a `.dmg` containing a self-contained `.app` bundle with `ffmpeg` baked in.
+This repo is the source. The shipped artifact is a notarized `.zip` containing a self-contained `.app` bundle with `ffmpeg` baked in.
 
 ## Layout
 
@@ -27,8 +27,7 @@ This repo is the source. The shipped artifact is a `.dmg` containing a self-cont
 │   ├── ffmpeg             # bundled static binary (NOT committed; download at build time)
 │   ├── icon.icns          # app icon
 │   ├── icon-src/          # source SVG for the icon
-│   ├── entitlements.plist # hardened-runtime entitlements
-│   └── Info.plist.template
+│   └── entitlements.plist # hardened-runtime entitlements
 ├── scripts/
 │   ├── build_and_sign.sh  # one-shot build + sign + notarize + zip
 │   └── build_icon.py      # regenerate icon.icns from charlie.svg
@@ -41,13 +40,15 @@ This repo is the source. The shipped artifact is a `.dmg` containing a self-cont
 ## Develop
 
 ```bash
-python3.11 -m venv venv
+python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt -e ".[test]"
 python -m src                   # run the app from source (pywebview UI)
 CHARLUFS_TK=1 python -m src     # legacy Tk UI (rollback)
 pytest                          # run the tests
 ```
+
+The venv must be active every time you build or run from source — `python` resolves to `venv/bin/python` once activated, and the build script will refuse to run otherwise.
 
 The end-to-end LUFS tests will run if `ffmpeg` is on `PATH` or `resources/ffmpeg` exists; otherwise they skip.
 
@@ -69,6 +70,12 @@ The end-to-end LUFS tests will run if `ffmpeg` is on `PATH` or `resources/ffmpeg
    TEAM_ID=TEAMID ./scripts/build_and_sign.sh
    ```
    Output: `dist/CharLUFS.app` and a shippable `CharLUFS.zip` at the repo root.
+4. Verify the build is properly signed:
+   ```bash
+   codesign -dv --verbose=4 dist/CharLUFS.app 2>&1 | head -5
+   spctl -a -vvv -t install dist/CharLUFS.app
+   ```
+   You want `Authority=Developer ID Application: …` and `source=Notarized Developer ID`. An `adhoc` flag in the codesign output means the bundle is unsigned — `python setup.py py2app` alone produces an adhoc build, which works locally but Gatekeeper will block it on other machines.
 
 To regenerate the icon from `resources/icon-src/charlie.svg` after editing it:
 
