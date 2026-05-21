@@ -115,7 +115,11 @@ class FolderWatcher:
             pass
 
     def _wait_stable(self, path: Path) -> bool:
-        """Wait for file size to stop changing. Returns True when stable."""
+        """Wait for file size to stop changing. Returns True when stable.
+
+        A 0-byte file is considered stable after STABLE_SECONDS — ffmpeg will
+        reject it downstream, but the worker won't get stuck on it.
+        """
         last_size = -1
         stable_for = 0.0
         elapsed = 0.0
@@ -126,7 +130,7 @@ class FolderWatcher:
                 return False
             except OSError:
                 return False
-            if size == last_size and size > 0:
+            if size == last_size:
                 stable_for += POLL_INTERVAL
                 if stable_for >= STABLE_SECONDS:
                     return True
