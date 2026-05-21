@@ -1,6 +1,6 @@
 # CharLUFS — How to Use
 
-A small Mac app that takes any audio file you drop into one folder and writes a louder, evened-out copy next to it at the standard podcast loudness (-16 LUFS).
+A small Mac app that takes any audio file you drop into one folder and writes a louder, evened-out copy next to it. By default it aims at standard podcast loudness (-16 LUFS), but you can drag the slider to whatever target you want — from quiet broadcast (-23) to loud-as-fuck (-8).
 
 You install it once. You run it whenever you want to normalize files. Quit when you're done.
 
@@ -14,15 +14,16 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 ## Use it
 
 1. Launch **CharLUFS**.
-2. The window shows a folder it's watching — by default `~/CharLUFS/` (the app creates it if it doesn't exist). Click **Open folder** to reveal it in Finder.
-3. **Drag any audio file into that folder.** Wait. The status line at the top of the app window will say things like:
-   - `Waiting for episode42.wav to finish copying…`
-   - `Processing: episode42.wav (pass 1/2)`
-   - `Processing: episode42.wav (pass 2/2)`
+2. The window shows a folder it's watching — by default `~/CharLUFS/` (the app creates it if it doesn't exist). Click **Open** next to the folder path to reveal it in Finder. Click **Change folder…** to point it elsewhere.
+3. (Optional) Set your target loudness with the slider, or click one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number above the slider is what every file will be normalized to.
+4. **Drag any audio file into that folder.** Wait. The status line will progress through messages like:
+   - `Waiting for episode42.wav…`
+   - `Measuring episode42.wav`
+   - `Normalizing episode42.wav`
    - `Done: episode42_normalized.wav (-16.0 LUFS)`
-4. A new file with `_normalized` added to the name appears next to the original. Use that one.
-5. Drop as many files as you want. They'll process one at a time.
-6. Quit the app (⌘Q or close the window) when you're done.
+5. A new file with `_normalized` added to the name appears next to the original. Use that one.
+6. Drop as many files as you want. They process one at a time. The full history is in the log at the bottom of the window.
+7. Quit the app (⌘Q or close the window) when you're done.
 
 ## Supported formats
 
@@ -39,9 +40,9 @@ If you'd rather watch a different folder (say, a project folder you keep on Drop
 
 ## When something looks wrong
 
-The app keeps a log of everything it does. If a file doesn't process or the result sounds off:
+The app keeps a log of everything it does, visible in the box at the bottom of the window. If a file doesn't process or the result sounds off:
 
-1. Click the **Copy log** button at the bottom of the window.
+1. Click **Copy log** in the top-right corner of the log box.
 2. Paste it into a message and send it to me.
 
 That's enough for me to figure out what happened.

@@ -1,10 +1,8 @@
 # Build resources
 
-These are files needed at build time but not committed to git.
+## `ffmpeg` (not committed)
 
-## `ffmpeg`
-
-Static universal2 macOS build. Download from <https://evermeet.cx/ffmpeg/> before running `python setup.py py2app`:
+Static universal2 macOS build. Download from <https://evermeet.cx/ffmpeg/> before running the build:
 
 ```bash
 curl -L -o /tmp/ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/zip
@@ -12,23 +10,20 @@ unzip -o /tmp/ffmpeg.zip -d resources/
 chmod +x resources/ffmpeg
 ```
 
-## `icon.icns`
+## `icon.icns` / `icon.png` (committed)
 
-App icon. If absent, py2app will use a generic one — fine for testing, replace before shipping.
-
-Generate from a 1024×1024 PNG:
+The shipped app icon, plus a PNG copy for the README. Both are generated from `icon-src/charlie.svg` by:
 
 ```bash
-mkdir icon.iconset
-sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
-sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
-sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
-sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
-sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
-sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
-sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
-sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
-sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
-cp icon.png       icon.iconset/icon_512x512@2x.png
-iconutil -c icns icon.iconset
+python ../scripts/build_icon.py
 ```
+
+That script renders the SVG over a rounded-square `#1C1D20` panel and writes both the `.icns` (every macOS size, from 16 up to 1024@2x) and the `.png`. Edit `icon-src/charlie.svg` and re-run to refresh.
+
+## `entitlements.plist` (committed)
+
+Hardened-runtime entitlements applied during signing. The build script (`scripts/build_and_sign.sh`) passes this to `codesign` when sealing the main bundle.
+
+## `Info.plist.template` (committed)
+
+Consumed by `setup.py` (py2app) and copied into `CharLUFS.app/Contents/Info.plist` at build time.
