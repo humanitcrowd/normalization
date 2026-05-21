@@ -10,7 +10,7 @@ CONFIG_PATH = APP_SUPPORT / "config.json"
 DEFAULT_WATCH_FOLDER = Path.home() / "CharLUFS"
 DEFAULT_TARGET_LUFS = -16.0
 MIN_TARGET_LUFS = -23.0
-MAX_TARGET_LUFS = -10.0
+MAX_TARGET_LUFS = -8.0
 
 
 def clamp_lufs(value: float) -> float:
