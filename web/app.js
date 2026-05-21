@@ -302,15 +302,21 @@
       const onLog = (e) => {
         setLog((l) => l.concat([parseLogLine(e.detail)]).slice(-200));
       };
+      const onDragReset = () => {
+        dragCounter.current = 0;
+        setDragOver(false);
+      };
       window.addEventListener("charlufs:status", onStatus);
       window.addEventListener("charlufs:queue", onQueue);
       window.addEventListener("charlufs:counter", onCounter);
       window.addEventListener("charlufs:log", onLog);
+      window.addEventListener("charlufs:drag_reset", onDragReset);
       return () => {
         window.removeEventListener("charlufs:status", onStatus);
         window.removeEventListener("charlufs:queue", onQueue);
         window.removeEventListener("charlufs:counter", onCounter);
         window.removeEventListener("charlufs:log", onLog);
+        window.removeEventListener("charlufs:drag_reset", onDragReset);
       };
     }, []);
 

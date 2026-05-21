@@ -56,11 +56,11 @@ class Config:
 
 
 def load() -> Config:
-    if CONFIG_PATH.exists():
-        try:
-            return Config.from_dict(json.loads(CONFIG_PATH.read_text()))
-        except (json.JSONDecodeError, OSError):
-            pass
+    """Always open with the default target. The slider's last value is still
+    written to disk (so we can revisit this later) but is intentionally
+    ignored on read — every launch starts at DEFAULT_TARGET_LUFS so the
+    producer doesn't get surprised by a stale setting from a previous
+    session."""
     return Config()
 
 

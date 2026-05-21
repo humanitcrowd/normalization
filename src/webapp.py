@@ -180,6 +180,10 @@ class WebApp:
         added = self.queue.add([Path(p) for p in paths])
         if added:
             log.info("Queued %d file(s) via drop", len(added))
+        # Native handler swallows the WebKit drop event, so JS never sees
+        # `drop` or `dragleave` and would otherwise leave its drag-over
+        # overlay stuck on. Tell it to clear.
+        self.push("drag_reset", None)
 
     # ── debounced config save ────────────────────────────────────────
 
