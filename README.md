@@ -89,20 +89,22 @@ python scripts/build_icon.py
 
 - Pristine originals: `<dir>/char backup/<filename>` — created next to each file the first time it's normalized. CharLUFS never deletes these automatically.
 - Processed-files history (for the Recover button across launches): `~/Library/Application Support/CharLUFS/processed.json`
-- Config (target LUFS): `~/Library/Application Support/CharLUFS/config.json`
+- Config: `~/Library/Application Support/CharLUFS/config.json` — `target_lufs` is written every time the slider moves but **ignored on launch**: the slider always resets to `DEFAULT_TARGET_LUFS` (-16) when the app starts. That's deliberate, so the producer doesn't pick up a stale value from a previous session.
 - Log: `~/Library/Logs/CharLUFS/normalizer.log` (rotates at 1 MB, 3 backups)
 
 ## How processing works
 
-- User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`.
+- User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`. After it handles the drop, Python dispatches a `charlufs:drag_reset` event to clear the JS-side drag overlay (since WKWebView swallows the drop event before JS sees `drop`/`dragleave`).
 - User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max.
+- New files dropped while processing auto-join the running pool — free workers pick them up within ~100ms.
 - For each file, `normalize_in_place` either copies the current file into `char backup/` (first run) or treats the existing backup as the source of truth (re-run), processes from the backup, and atomic-replaces the file at the original path.
 - On success, an entry is upserted into `processed.json`. On next launch, those entries seed the Queue as `done` rows so the **Recover** button is available across sessions.
-- Recover: delete the (post-normalize) file at the original location, copy `char backup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
+- **Recover** (per row): delete the file at the original location, copy `char backup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
+- **Clear** (button): wipe all Pending + Done + Error rows from the queue and drop their entries from `processed.json`. Anything currently encoding is left alone. The on-disk `char backup/` folders are never touched — manual recover via Finder still works.
 
 ## Hardcoded choices
 
-- Target loudness: **adjustable in the UI** — default **-16 LUFS integrated**, range **-23 to -8 LUFS** in 0.5 LU steps (snapped). True peak **-1.5 dBTP**, LRA **11 LU**.
+- Target loudness: **adjustable in the UI** — default **-16 LUFS integrated**, range **-23 to -8 LUFS** in 0.5 LU steps (snapped). True peak **-1.5 dBTP**, LRA **11 LU**. The slider resets to -16 on every launch (see "Where things live at runtime").
 - Output sample rate: **48 kHz**
 - Output codecs by container:
   - `.wav` → 24-bit PCM (`pcm_s24le`)

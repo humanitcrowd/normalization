@@ -13,12 +13,14 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 
 ## Use it
 
-1. Launch **CharLUFS**.
-2. Set your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file will be normalized to.
+1. Launch **CharLUFS**. The target slider always starts at **-16 LUFS** (standard podcast loudness). If you want something else, set it now.
+2. Pick your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file will be normalized to.
 3. **Drag one or more audio files anywhere onto the app window.** They show up in the Queue with the status "Pending".
 4. Click **Start**. CharLUFS processes files in parallel — on a modern Mac it'll burn through 4–8 files at once. Each row shows progress: Pending → Processing → Done.
 5. Each finished file is **rewritten in place** — same name, same folder. The original lands in a sibling folder called `char backup`. You'll see `char backup/episode42.wav` next to your `episode42.wav`.
 6. While files process, you can drop more — they auto-join the queue.
+
+The slider's setting **does not stick between launches** — quit and reopen the app and you're back at -16. (If that ever bites you, let me know.)
 
 ## Recover an original
 
@@ -32,6 +34,10 @@ You can also recover by hand — the `char backup` folder is a regular Finder fo
 ## Re-normalize a file at a new target
 
 Drop it again. The row flips back to **Pending**; CharLUFS reads from `char backup/` (not from the already-normalized current file), so every re-run starts from the true original. Adjust the slider, click Start.
+
+## Clear the list
+
+The **Clear** button wipes the queue — Pending, Done, and Error rows all go away (anything currently encoding is left alone). The `char backup` folders on disk are **never touched** by Clear, so even after clearing you can still recover any file by hand from Finder. You just lose the in-app Recover buttons for those rows.
 
 ## Supported formats
 
