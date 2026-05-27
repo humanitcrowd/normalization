@@ -281,8 +281,8 @@ class WebApp:
             "CharLUFS",
             url=str(index),
             js_api=Api(self),
-            width=640, height=560,
-            min_size=(520, 440),
+            width=720, height=560,
+            min_size=(600, 440),
             background_color="#1C1D20",
             resizable=True,
         )

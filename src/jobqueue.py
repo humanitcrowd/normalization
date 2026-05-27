@@ -46,6 +46,7 @@ class _Item:
     path: Path
     status: str = "pending"  # pending | processing | done | error
     measured_in: float | None = None
+    measured_tp: float | None = None
     measured_out: float | None = None
     error: str | None = None
     output_name: str | None = None
@@ -66,6 +67,7 @@ class _Item:
             "name": self.path.name,
             "status": self.status,
             "measured_in": self.measured_in,
+            "measured_tp": self.measured_tp,
             "measured_out": self.measured_out,
             "measure_state": self.measure_state,
             "error": self.error,
@@ -210,6 +212,7 @@ class JobQueue:
                 return
             if m is not None:
                 item.measured_in = m.input_i
+                item.measured_tp = m.input_tp
                 item._measurement = m
                 item._measured_target = target
                 item.measure_state = "measured"

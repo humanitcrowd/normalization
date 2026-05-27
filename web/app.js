@@ -166,6 +166,20 @@
     );
   }
 
+  // metric column widths so LUFS / dBTP line up across rows
+  const COL_LUFS = 78;
+  const COL_TP = 74;
+
+  function metricCol(text, width, color) {
+    return h("div", {
+      style: {
+        width, flexShrink: 0, textAlign: "right",
+        fontSize: 11, color: color || THEME.textDim,
+        fontVariantNumeric: "tabular-nums",
+      },
+    }, text);
+  }
+
   // ── Queue item row ──
   function QueueItem(props) {
     const { item, index, onRemove, onReveal, onRecover } = props;
@@ -173,29 +187,44 @@
 
     let dotColor = THEME.idle;
     let pulsing = false;
-    let detail = "";
+
+    // metrics renders either a single status string (spanning both columns)
+    // or two aligned numeric columns (LUFS + dBTP).
+    let metrics;
 
     if (status === "pending") {
       dotColor = THEME.textFaint;
       if (item.measure_state === "measuring") {
-        detail = "Analyzing…";
+        metrics = metricCol("Analyzing…", COL_LUFS + COL_TP);
       } else if (item.measured_in != null) {
-        detail = `${item.measured_in.toFixed(1)} LUFS`;
+        const tpHot = item.measured_tp != null && item.measured_tp > -1.0;
+        metrics = [
+          metricCol(`${item.measured_in.toFixed(1)} LUFS`, COL_LUFS),
+          metricCol(
+            item.measured_tp != null ? `${item.measured_tp.toFixed(1)} dBTP` : "—",
+            COL_TP,
+            tpHot ? THEME.error : THEME.textDim,
+          ),
+        ];
       } else {
-        detail = "Pending";
+        metrics = metricCol("Pending", COL_LUFS + COL_TP);
       }
     } else if (status === "processing") {
       dotColor = THEME.accent;
       pulsing = true;
-      detail = "Processing…";
+      metrics = metricCol("Processing…", COL_LUFS + COL_TP, THEME.accent);
     } else if (status === "done") {
       dotColor = THEME.success;
-      detail = item.measured_out != null
-        ? `${item.measured_out.toFixed(1)} LUFS`
-        : "Done";
+      metrics = [
+        metricCol(
+          item.measured_out != null ? `${item.measured_out.toFixed(1)} LUFS` : "Done",
+          COL_LUFS, THEME.success,
+        ),
+        metricCol("", COL_TP),
+      ];
     } else if (status === "error") {
       dotColor = THEME.error;
-      detail = item.error || "Error";
+      metrics = metricCol(item.error || "Error", COL_LUFS + COL_TP, THEME.error);
     }
 
     const removable = status !== "processing";
@@ -222,13 +251,7 @@
           cursor: "pointer",
         },
       }, item.name),
-      h("div", {
-        style: {
-          fontSize: 11, color: THEME.textDim,
-          fontVariantNumeric: "tabular-nums",
-          flexShrink: 0,
-        },
-      }, detail),
+      ...(Array.isArray(metrics) ? metrics : [metrics]),
       recoverable && h("button", {
         onClick: () => onRecover(item.path, item.name),
         title: "Restore the original from CharBackup, deleting the normalized file",
