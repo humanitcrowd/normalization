@@ -45,6 +45,18 @@
   const LUFS_STEP = 0.5;
   const LUFS_DEFAULT = -16;
 
+  const TP_MIN = -6;
+  const TP_MAX = -0.5;
+  const TP_STEP = 0.5;
+  const TP_DEFAULT = -1.5;
+
+  function snapTruePeak(v) {
+    let s = Math.round(v * 2) / 2;
+    if (s < TP_MIN) s = TP_MIN;
+    if (s > TP_MAX) s = TP_MAX;
+    return s;
+  }
+
   const PRESETS = [
     { value: -23, label: "EBU R128" },
     { value: -19, label: "Audible" },
@@ -88,6 +100,21 @@
         color: THEME.textFaint, fontWeight: 600, marginBottom: 6,
       },
     }, props.children);
+  }
+
+  function StepButton(props) {
+    return h("button", {
+      onClick: props.disabled ? undefined : props.onClick,
+      disabled: props.disabled,
+      style: {
+        width: 26, height: 24, padding: 0,
+        background: "transparent", border: "none",
+        color: props.disabled ? THEME.textFaint : THEME.text,
+        fontSize: 15, lineHeight: 1,
+        cursor: props.disabled ? "default" : "pointer",
+        opacity: props.disabled ? 0.4 : 1,
+      },
+    }, props.label);
   }
 
   function StatusDot(props) {
@@ -293,6 +320,7 @@
   // ── App ──
   function App() {
     const [lufs, setLufs] = useState(LUFS_DEFAULT);
+    const [truePeak, setTruePeak] = useState(TP_DEFAULT);
     const [status, setStatus] = useState({ kind: "idle" });
     const [queue, setQueue] = useState([]);
     const [processed, setProcessed] = useState(0);
@@ -310,6 +338,7 @@
           const state = await window.pywebview.api.get_initial_state();
           if (cancelled) return;
           if (typeof state.target_lufs === "number") setLufs(state.target_lufs);
+          if (typeof state.true_peak === "number") setTruePeak(state.true_peak);
           if (Array.isArray(state.queue)) setQueue(state.queue);
           if (Array.isArray(state.log)) {
             setLog(state.log.map((line) => parseLogLine(line)));
@@ -358,6 +387,14 @@
       setLufs(v);
       if (window.pywebview && window.pywebview.api) {
         window.pywebview.api.set_target_lufs(v).catch(() => {});
+      }
+    }
+
+    function onTruePeakChange(raw) {
+      const v = snapTruePeak(parseFloat(raw));
+      setTruePeak(v);
+      if (window.pywebview && window.pywebview.api) {
+        window.pywebview.api.set_true_peak(v).catch(() => {});
       }
     }
 
@@ -546,7 +583,47 @@
                   h("span", { style: { fontFamily: '"SF Mono", ui-monospace, Menlo, monospace' } }, p.value),
                   h("span", { style: { fontSize: 9, letterSpacing: 0.3 } }, p.label)
                 );
-              }))
+              })),
+              // True peak ceiling stepper
+              h("div", {
+                style: {
+                  display: "flex", alignItems: "center", gap: 8, marginTop: 14,
+                },
+              },
+                h("span", {
+                  style: {
+                    fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5,
+                    color: THEME.textFaint, fontWeight: 600,
+                  },
+                }, "True peak ceiling"),
+                h("div", {
+                  style: {
+                    marginLeft: "auto", display: "flex", alignItems: "center",
+                    gap: 0, background: THEME.bgSunken,
+                    border: `0.5px solid ${THEME.border}`, borderRadius: 6,
+                    overflow: "hidden",
+                  },
+                },
+                  h(StepButton, {
+                    label: "−",
+                    disabled: truePeak <= TP_MIN,
+                    onClick: () => onTruePeakChange(truePeak - TP_STEP),
+                  }),
+                  h("span", {
+                    style: {
+                      minWidth: 64, textAlign: "center",
+                      fontSize: 12, fontWeight: 600, color: THEME.text,
+                      fontVariantNumeric: "tabular-nums",
+                      fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+                    },
+                  }, `${truePeak.toFixed(1)} dBTP`),
+                  h(StepButton, {
+                    label: "+",
+                    disabled: truePeak >= TP_MAX,
+                    onClick: () => onTruePeakChange(truePeak + TP_STEP),
+                  })
+                )
+              )
             ),
             // Charlie
             h("div", {

@@ -81,9 +81,11 @@ class _Item:
 class JobQueue:
     def __init__(self, callbacks: QueueCallbacks,
                  target_lufs: float = -16.0,
+                 true_peak: float = -1.5,
                  parallelism: int | None = None) -> None:
         self.callbacks = callbacks
         self.target_lufs = target_lufs
+        self.true_peak = true_peak
         self.parallelism = parallelism or _default_parallelism()
         self._items: list[_Item] = []
         # Single RLock protects: _items, _running, _active_count.
@@ -386,11 +388,23 @@ class JobQueue:
 
     def _process(self, item: _Item) -> None:
         target_lufs_used = self.target_lufs
+        # Reuse the measure-on-drop figures (ebur128) so we don't decode the
+        # source twice. Valid for any target — they describe the input, not
+        # the gain. If measurement hasn't finished, pass None and let the
+        # normalizer measure.
+        with self._state_lock:
+            if item.measure_state == "measured":
+                src_i, src_tp = item.measured_in, item.measured_tp
+            else:
+                src_i, src_tp = None, None
         try:
             result = normalizer.normalize_in_place(
                 item.path,
                 progress=self.callbacks.on_status,
                 target_lufs=target_lufs_used,
+                true_peak=self.true_peak,
+                src_integrated=src_i,
+                src_true_peak=src_tp,
             )
             # Report the achieved output level with the ebur128 meter so the
             # 'Done' number matches dedicated meters. Fall back to loudnorm's

@@ -1,6 +1,13 @@
-"""Two-pass EBU R128 loudness normalization via ffmpeg."""
+"""EBU R128 loudness normalization via ffmpeg.
+
+The in-place path (`normalize_in_place`, used by the app) applies a single
+linear gain measured with the ebur128 meter — no compression or limiting.
+The legacy `normalize` (`_normalized` sibling output, used by tests) still
+uses loudnorm's two-pass.
+"""
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -154,10 +161,11 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def measure(ffmpeg: str, input_path: Path,
-            target_lufs: float = LUFS_TARGET) -> Measurement | None:
+            target_lufs: float = LUFS_TARGET,
+            true_peak: float = TRUE_PEAK) -> Measurement | None:
     cmd = [
         ffmpeg, "-hide_banner", "-nostats", "-i", str(input_path),
-        "-af", f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:print_format=json",
+        "-af", f"loudnorm=I={target_lufs}:TP={true_peak}:LRA={LRA}:print_format=json",
         "-f", "null", "-",
     ]
     proc = _run(cmd)
@@ -202,9 +210,10 @@ def measure_loudness(input_path: Path,
 
 def apply_two_pass(ffmpeg: str, input_path: Path, output_path: Path,
                    m: Measurement,
-                   target_lufs: float = LUFS_TARGET) -> tuple[bool, str]:
+                   target_lufs: float = LUFS_TARGET,
+                   true_peak: float = TRUE_PEAK) -> tuple[bool, str]:
     af = (
-        f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:"
+        f"loudnorm=I={target_lufs}:TP={true_peak}:LRA={LRA}:"
         f"measured_I={m.input_i}:measured_TP={m.input_tp}:"
         f"measured_LRA={m.input_lra}:measured_thresh={m.input_thresh}:"
         f"offset={m.target_offset}:linear=true:print_format=summary"
@@ -222,12 +231,29 @@ def apply_two_pass(ffmpeg: str, input_path: Path, output_path: Path,
 
 def apply_single_pass(ffmpeg: str, input_path: Path,
                       output_path: Path,
-                      target_lufs: float = LUFS_TARGET) -> tuple[bool, str]:
-    af = f"loudnorm=I={target_lufs}:TP={TRUE_PEAK}:LRA={LRA}:print_format=summary"
+                      target_lufs: float = LUFS_TARGET,
+                      true_peak: float = TRUE_PEAK) -> tuple[bool, str]:
+    af = f"loudnorm=I={target_lufs}:TP={true_peak}:LRA={LRA}:print_format=summary"
     cmd = [
         ffmpeg, "-hide_banner", "-y", "-i", str(input_path),
         "-af", af,
         "-ar", str(SAMPLE_RATE),
+        *_output_codec_args(output_path.suffix),
+        str(output_path),
+    ]
+    proc = _run(cmd)
+    return proc.returncode == 0, proc.stderr
+
+
+def apply_linear_gain(ffmpeg: str, input_path: Path, output_path: Path,
+                      gain_db: float) -> tuple[bool, str]:
+    """Apply a single static gain with the `volume` filter — pure linear
+    scaling, no dynamics processing of any kind. Sample rate is NOT changed
+    (so inter-sample/true peaks scale exactly with the gain), only the
+    codec/bit-depth follows the output container."""
+    cmd = [
+        ffmpeg, "-hide_banner", "-y", "-i", str(input_path),
+        "-af", f"volume={gain_db:.4f}dB",
         *_output_codec_args(output_path.suffix),
         str(output_path),
     ]
@@ -258,28 +284,33 @@ def _run_normalization(input_path: Path, output_path: Path, ffmpeg: str,
                        display_name: str,
                        progress: ProgressCb | None,
                        target_lufs: float,
+                       true_peak: float = TRUE_PEAK,
                        ) -> tuple[float | None, float | None]:
     """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs)."""
     log = get_logger()
 
     if progress:
         progress(f"Measuring {display_name}")
-    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
-    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
+    log.info("Pass 1 (measure, target %.1f LUFS, TP %.1f dBTP): %s",
+             target_lufs, true_peak, display_name)
+    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs,
+                          true_peak=true_peak)
 
     if measurement is not None:
         if progress:
             progress(f"Normalizing {display_name}")
         log.info("Pass 2 (apply): %s", display_name)
         ok, stderr = apply_two_pass(ffmpeg, input_path, output_path,
-                                    measurement, target_lufs=target_lufs)
+                                    measurement, target_lufs=target_lufs,
+                                    true_peak=true_peak)
     else:
         log.warning("Pass-1 JSON missing for %s; falling back to single-pass",
                     display_name)
         if progress:
             progress(f"Normalizing {display_name} (single-pass)")
         ok, stderr = apply_single_pass(ffmpeg, input_path, output_path,
-                                       target_lufs=target_lufs)
+                                       target_lufs=target_lufs,
+                                       true_peak=true_peak)
 
     if not ok:
         _log_ffmpeg_failure("encode", input_path, stderr)
@@ -342,23 +373,35 @@ def source_path_for(path: Path) -> Path:
 
 def normalize_in_place(path: Path, ffmpeg: str | None = None,
                        progress: ProgressCb | None = None,
-                       target_lufs: float = LUFS_TARGET) -> Result:
-    """Normalize a file in place, preserving the pristine original in a sibling
-    `CharBackup/` folder.
+                       target_lufs: float = LUFS_TARGET,
+                       true_peak: float = TRUE_PEAK,
+                       src_integrated: float | None = None,
+                       src_true_peak: float | None = None) -> Result:
+    """Normalize a file in place with a SINGLE LINEAR GAIN — no compression,
+    no limiting, no dynamics processing of any kind. The pristine original is
+    preserved in a sibling `CharBackup/` folder.
+
+    The gain is:  min(target_lufs - measured_LUFS, true_peak - measured_TP)
+
+    Because both loudness and true peak scale exactly with a linear gain, this
+    guarantees the output never exceeds the true-peak ceiling. If a peaky
+    source can't reach the loudness target without breaching the ceiling, the
+    gain is capped and the file simply lands a little quieter than target —
+    we never compress to force it. Sample rate is preserved (no resample), so
+    the true-peak guarantee is exact.
 
     Behavior:
       - If `<dir>/CharBackup/<name>` already exists, it is treated as the
-        source of truth (the pristine original). We re-process from there,
-        overwriting whatever currently sits at `path`. This makes repeated
-        normalizations idempotent w.r.t. the original audio — every run starts
-        from the backup.
-      - If the backup doesn't exist yet, we copy the current file into the
-        backup folder first, then process from the backup.
+        source of truth (the pristine original); we re-process from there.
+      - Otherwise the current file is copied into the backup folder first.
 
-    For lossy containers (.ogg/.opus/.wma), output is a WAV in the original
-    location with the same stem (the original file with the lossy extension
-    is removed from its location since the pristine copy now lives in the
-    backup folder).
+    `src_integrated` / `src_true_peak` let the caller pass a measurement
+    already taken on drop, to skip re-measuring; if either is missing we
+    measure here.
+
+    For lossy containers (.ogg/.opus/.wma) the output is a WAV with the same
+    stem (the original lossy file is removed from its location since the
+    pristine copy now lives in the backup folder).
     """
     log = get_logger()
     ffmpeg = ffmpeg or find_ffmpeg()
@@ -377,6 +420,24 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
         shutil.copy2(path, backup)
         log.info("Backed up original: %s -> %s", path.name, backup)
 
+    # Measure the source (reuse a measurement from drop if we were handed one).
+    if src_integrated is None or src_true_peak is None:
+        if progress:
+            progress(f"Measuring {path.name}")
+        src_integrated, src_true_peak = measure_loudness(backup, ffmpeg)
+    if src_integrated is None:
+        raise NormalizerError(
+            f"could not measure loudness of {path.name} (silent or unreadable)"
+        )
+
+    # Capped linear gain: reach the target unless that would breach the ceiling.
+    desired_gain = target_lufs - src_integrated
+    if src_true_peak is not None:
+        headroom = true_peak - src_true_peak
+        gain_db = min(desired_gain, headroom)
+    else:
+        gain_db = desired_gain
+
     source_ext = backup.suffix.lower()
     out_ext = ".wav" if source_ext in LOSSY_TO_WAV else backup.suffix
     final_path = path.with_name(f"{path.stem}{out_ext}")
@@ -386,37 +447,44 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
     if temp_path.exists():
         temp_path.unlink()
 
+    if progress:
+        progress(f"Normalizing {path.name}")
+    log.info("Linear gain %+.2f dB (in %.1f LUFS / %.1f dBTP, target %.1f, "
+             "ceiling %.1f): %s",
+             gain_db, src_integrated, src_true_peak if src_true_peak is not None else 0.0,
+             target_lufs, true_peak, path.name)
+
     try:
-        measured_in, measured_out = _run_normalization(
-            backup, temp_path, ffmpeg, path.name, progress, target_lufs,
-        )
+        ok, stderr = apply_linear_gain(ffmpeg, backup, temp_path, gain_db)
     except Exception:
         if temp_path.exists():
-            try:
+            with contextlib.suppress(OSError):
                 temp_path.unlink()
-            except OSError:
-                pass
         raise
+    if not ok:
+        _log_ffmpeg_failure("gain", backup, stderr)
+        if temp_path.exists():
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+        raise NormalizerError(
+            f"ffmpeg failed for {path.name} (see "
+            f"~/Library/Logs/CharLUFS/normalizer.log)"
+        )
 
-    # Atomic-replace the destination
     os.replace(str(temp_path), str(final_path))
 
     # If extension changed (lossy -> .wav), the original file at the old
     # extension is now stale; remove it (the pristine copy lives in backup).
     if final_path != path and path.exists():
-        try:
+        with contextlib.suppress(OSError):
             path.unlink()
-        except OSError:
-            log.warning("Could not remove stale original at %s", path)
 
-    if measured_out is not None:
-        log.info("Done in place: %s (out: %.1f LUFS%s)",
-                 final_path.name, measured_out,
-                 f", in: {measured_in:.1f} LUFS" if measured_in is not None else "")
-    else:
-        log.info("Done in place: %s", final_path.name)
+    # Loudness + true peak scale exactly with linear gain.
+    measured_out = src_integrated + gain_db
+    log.info("Done in place: %s (out %.1f LUFS, gain %+.2f dB)",
+             final_path.name, measured_out, gain_db)
 
     return Result(
         input_path=path, output_path=final_path,
-        measured_in=measured_in, measured_out=measured_out,
+        measured_in=src_integrated, measured_out=measured_out,
     )

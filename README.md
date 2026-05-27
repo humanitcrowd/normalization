@@ -1,6 +1,6 @@
 # CharLUFS
 
-A small macOS desktop app that loudness-normalizes audio files dragged onto it. Drop one file or fifty, hit **Start**, and CharLUFS rewrites each file in place at your chosen LUFS target — the pristine original is preserved in a `CharBackup/` folder next to each file, so re-runs always start from the true original. The target loudness is adjustable from the UI (default **-16 LUFS**, range -23 to -8). No terminal, no Python, no Homebrew.
+A small macOS desktop app that loudness-normalizes audio files dragged onto it. Drop one file or fifty, hit **Start**, and CharLUFS rewrites each file in place at your chosen LUFS target using a **single linear gain — no compression, ever** — capped so the output never exceeds your true-peak ceiling. The pristine original is preserved in a `CharBackup/` folder next to each file, so re-runs always start from the true original. Target loudness (default **-16 LUFS**, -23 to -8) and true-peak ceiling (default **-1.5 dBTP**) are both adjustable in the UI. No terminal, no Python, no Homebrew.
 
 This repo is the source. The shipped artifact is a notarized `.zip` containing a self-contained `.app` bundle with `ffmpeg` baked in.
 
@@ -89,27 +89,30 @@ python scripts/build_icon.py
 
 - Pristine originals: `<dir>/CharBackup/<filename>` — created next to each file the first time it's normalized. CharLUFS never deletes these automatically.
 - Processed-files history (for the Recover button across launches): `~/Library/Application Support/CharLUFS/processed.json`
-- Config: `~/Library/Application Support/CharLUFS/config.json` — `target_lufs` is written every time the slider moves but **ignored on launch**: the slider always resets to `DEFAULT_TARGET_LUFS` (-16) when the app starts. That's deliberate, so the producer doesn't pick up a stale value from a previous session.
+- Config: `~/Library/Application Support/CharLUFS/config.json` — `target_lufs` is written every time the slider moves but **ignored on launch** (the slider always resets to -16, so the producer doesn't pick up a stale creative setting). `true_peak` **is** restored on launch — it's a delivery-spec ceiling you set once.
 - Log: `~/Library/Logs/CharLUFS/normalizer.log` (rotates at 1 MB, 3 backups)
 
 ## How processing works
 
 - User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`. After it handles the drop, Python dispatches a `charlufs:drag_reset` event to clear the JS-side drag overlay (since WKWebView swallows the drop event before JS sees `drop`/`dragleave`).
 - **Measure on drop**: as soon as files are queued, `JobQueue` measures each one in the background with ffmpeg's `ebur128` filter (`normalizer.measure_loudness`), capped at `parallelism` concurrent runs by a semaphore, and shows its input loudness + true peak next to the row. `ebur128` is a faithful BS.1770 meter — it tracks dedicated meters (RX, YouLean) more closely than `loudnorm`'s readout, and applies the correct multichannel weighting (L/C/R at 0 dB, surrounds +1.5 dB, LFE excluded) from the file's channel layout. The measurement is taken against the *source* `normalize_in_place` will use — the `CharBackup/` copy if one exists, else the file itself — so re-dropping an already-normalized file shows the original's level.
-- **Measuring vs. normalizing**: `ebur128` provides the numbers we *display*; `loudnorm` is still the engine that *applies* the gain (two-pass linear with true-peak limiting). They're separate implementations of the same spec, so the engine's internal pass-1 measurement and the displayed `ebur128` figure can differ by ~0.1 LU — expected and inaudible.
-- **True peak is an estimate.** BS.1770 true peak is reconstructed by oversampling (spec mandates ≥4×) — it's not a measured sample. ffmpeg, RX, Ozone, and YouLean each use slightly different oversampling/reconstruction, so TP readings can legitimately differ by 0.1–0.3 dB between meters, especially on transient material. Switching the displayed measurement to `ebur128` tightens the *integrated LUFS* against reference meters but does not (and cannot) eliminate cross-meter TP variance. Note `loudnorm` enforces its -1.5 dBTP ceiling using its *own* TP estimate, so a downstream meter may read the output a touch above or below -1.5; lower `TRUE_PEAK` in `normalizer.py` if a delivery spec needs hard headroom.
-- User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max.
+- **Pure linear gain — never any compression.** This is the core guarantee. For each file we measure the source (ebur128 → integrated LUFS + true peak) and apply **one static gain**:
+  `gain = min(target_lufs − measured_LUFS, true_peak_ceiling − measured_TP)`.
+  Because loudness *and* true peak both scale exactly with a linear gain, the output is guaranteed never to exceed the ceiling. If a peaky source can't reach the loudness target without breaching the ceiling, the gain is capped and the file lands a little **quieter** than target — we never compress/limit to force it. The gain is applied with the `volume` filter (`normalizer.apply_linear_gain`); `loudnorm` is no longer in the in-place path.
+- **Sample rate is preserved** (no forced resample) — resampling can shift inter-sample peaks and would break the exact true-peak guarantee, and it's an audio change we don't want. Output keeps the source rate.
+- **True peak is an estimate.** BS.1770 true peak is reconstructed by oversampling (spec mandates ≥4×) — it's not a measured sample. ffmpeg, RX, Ozone, and YouLean each use slightly different oversampling/reconstruction, so TP readings can legitimately differ by 0.1–0.3 dB between meters, especially on transient material. Our ceiling is enforced against ffmpeg's `ebur128` TP estimate, so a downstream meter may read the output a hair above/below the ceiling; lower the ceiling for hard headroom.
+- User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max. The measure-on-drop figures are reused so the source isn't decoded twice.
 - New files dropped while processing auto-join the running pool — free workers pick them up within ~100ms.
-- For each file, `normalize_in_place` either copies the current file into `CharBackup/` (first run) or treats the existing backup as the source of truth (re-run), runs `loudnorm` two-pass from the backup, and atomic-replaces the file at the original path. Channel count/layout is preserved (no `-ac`/downmix), so 5.1 in → 5.1 out with a uniform gain.
-- The achieved output level on the `done` row is re-measured with `ebur128` so it matches dedicated meters too.
+- For each file, `normalize_in_place` either copies the current file into `CharBackup/` (first run) or treats the existing backup as the source of truth (re-run), applies the linear gain from the backup, and atomic-replaces the file at the original path. Channel count/layout is preserved (no `-ac`/downmix), so 5.1 in → 5.1 out with a uniform gain.
 - On success, an entry is upserted into `processed.json`. On next launch, those entries seed the Queue as `done` rows so the **Recover** button is available across sessions.
 - **Recover** (per row): delete the file at the original location, copy `CharBackup/<filename>` back over it, drop the history entry. The backup file itself is left in place.
 - **Clear** (button): wipe all Pending + Done + Error rows from the queue and drop their entries from `processed.json`. Anything currently encoding is left alone. The on-disk `CharBackup/` folders are never touched — manual recover via Finder still works.
 
-## Hardcoded choices
+## Settings & fixed choices
 
-- Target loudness: **adjustable in the UI** — default **-16 LUFS integrated**, range **-23 to -8 LUFS** in 0.5 LU steps (snapped). True peak **-1.5 dBTP**, LRA **11 LU**. The slider resets to -16 on every launch (see "Where things live at runtime").
-- Output sample rate: **48 kHz**
+- **Target loudness** — adjustable in the UI (slider/presets). Default **-16 LUFS**, range **-23 to -8 LUFS**, 0.5 LU steps. Resets to -16 on every launch (see "Where things live at runtime").
+- **True-peak ceiling** — adjustable in the UI (stepper). Default **-1.5 dBTP**, range **-6.0 to -0.5 dBTP**, 0.5 dB steps. Unlike the loudness target, this **persists** across launches (it's a delivery-spec setting). The gain is capped so the output never exceeds this.
+- **Processing** — single linear gain only. No compression, no limiting, no LRA target. Sample rate preserved.
 - Output codecs by container:
   - `.wav` → 24-bit PCM (`pcm_s24le`)
   - `.aif` / `.aiff` → 24-bit PCM (`pcm_s24be`)
@@ -119,4 +122,4 @@ python scripts/build_icon.py
   - `.ogg` / `.opus` / `.wma` → 24-bit WAV (we don't pretend to round-trip these losslessly). The pristine original keeps its lossy extension in `CharBackup/`.
 - Output: same path as input (in-place replace). For lossy inputs the extension changes to `.wav` and the original `.ogg`/`.opus`/`.wma` file is removed from its location (still preserved in the backup folder).
 
-The default target and the slider range live in `src/config.py` (`DEFAULT_TARGET_LUFS`, `MIN_TARGET_LUFS`, `MAX_TARGET_LUFS`).
+Defaults and ranges live in `src/config.py` (`DEFAULT_TARGET_LUFS`/`MIN`/`MAX_TARGET_LUFS`, `DEFAULT_TRUE_PEAK`/`MIN`/`MAX_TRUE_PEAK`).

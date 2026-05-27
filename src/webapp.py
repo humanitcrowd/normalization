@@ -63,6 +63,7 @@ class Api:
         snapshot = get_store().snapshot(80)
         return {
             "target_lufs": self._app.config.target_lufs,
+            "true_peak": self._app.config.true_peak,
             "log": list(snapshot),
             "queue": self._app.queue.snapshot() if self._app.queue else [],
             "files_processed": (
@@ -71,6 +72,8 @@ class Api:
             "running": self._app.queue.is_running if self._app.queue else False,
             "min_lufs": cfg.MIN_TARGET_LUFS,
             "max_lufs": cfg.MAX_TARGET_LUFS,
+            "min_true_peak": cfg.MIN_TRUE_PEAK,
+            "max_true_peak": cfg.MAX_TRUE_PEAK,
         }
 
     def set_target_lufs(self, value: float) -> float:
@@ -79,6 +82,14 @@ class Api:
         self._app.schedule_save()
         if self._app.queue is not None:
             self._app.queue.target_lufs = snapped
+        return snapped
+
+    def set_true_peak(self, value: float) -> float:
+        snapped = cfg.clamp_true_peak(float(value))
+        self._app.config.true_peak = snapped
+        self._app.schedule_save()
+        if self._app.queue is not None:
+            self._app.queue.true_peak = snapped
         return snapped
 
     def start_processing(self) -> bool:
@@ -170,6 +181,7 @@ class WebApp:
         self.queue = JobQueue(
             self._make_callbacks(),
             target_lufs=self.config.target_lufs,
+            true_peak=self.config.true_peak,
         )
 
     # ── files dropped from native handler ────────────────────────────
