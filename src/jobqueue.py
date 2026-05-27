@@ -52,6 +52,13 @@ class _Item:
     backup_path: str | None = None
     processed_at: str | None = None
     target_lufs_used: float | None = None
+    # measure-on-drop: idle | measuring | measured. Not the same as `status`.
+    measure_state: str = "idle"
+    # Cached pass-1 result + the target it was computed against. Reused at
+    # processing time to skip pass 1 when the target is unchanged. Never
+    # serialized to JS.
+    _measurement: object = None
+    _measured_target: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -60,6 +67,7 @@ class _Item:
             "status": self.status,
             "measured_in": self.measured_in,
             "measured_out": self.measured_out,
+            "measure_state": self.measure_state,
             "error": self.error,
             "output_name": self.output_name,
             "backup_path": self.backup_path,
@@ -87,6 +95,9 @@ class JobQueue:
         self._active_count = 0
         self._files_processed = 0
         self._stop_event = threading.Event()
+        # Caps concurrent measure-on-drop ffmpeg passes so a big drop doesn't
+        # spawn one ffmpeg per file all at once.
+        self._measure_sem = threading.Semaphore(self.parallelism)
         # Seed from persisted history so previously processed files (with
         # working backups) show up as `done` rows with a Recover button.
         self._load_history()
@@ -144,13 +155,67 @@ class JobQueue:
                     added.append(p)
                 elif existing.status in ("done", "error"):
                     # Re-arm: keep historical fields, just flip status back
-                    # to pending so workers will pick it up.
+                    # to pending so workers will pick it up. Drop the stale
+                    # measure cache so it gets re-analyzed against the source.
                     existing.status = "pending"
                     existing.error = None
+                    existing.measure_state = "idle"
+                    existing._measurement = None
+                    existing._measured_target = None
                     added.append(p)
                 # If already pending/processing, leave alone.
         self._push_snapshot()
+        # Analyze the new drops in the background so the UI can show input
+        # levels before the user clicks Start.
+        for p in added:
+            threading.Thread(target=self._measure_item, args=(p,),
+                             daemon=True).start()
         return added
+
+    def _measure_item(self, path: Path) -> None:
+        """Background measure-on-drop: compute the input LUFS of the source
+        (the pristine backup if one exists, else the file itself) and cache
+        the pass-1 result for reuse at processing time."""
+        key = str(path)
+        target = self.target_lufs
+        with self._state_lock:
+            item = next((it for it in self._items if str(it.path) == key), None)
+            if item is None or item.status != "pending":
+                return
+            if item.measure_state == "measuring":
+                return
+            if item._measurement is not None and item._measured_target == target:
+                return  # already measured for this target
+            item.measure_state = "measuring"
+        self._push_snapshot()
+
+        m = None
+        with self._measure_sem:
+            # Bail if the item got picked up for processing while we waited.
+            with self._state_lock:
+                item = next((it for it in self._items
+                             if str(it.path) == key), None)
+                if item is None or item.status != "pending":
+                    return
+            try:
+                ffmpeg = normalizer.find_ffmpeg()
+                src = normalizer.source_path_for(path)
+                m = normalizer.measure(ffmpeg, src, target_lufs=target)
+            except Exception:
+                get_logger().exception("measure-on-drop failed for %s", path.name)
+
+        with self._state_lock:
+            item = next((it for it in self._items if str(it.path) == key), None)
+            if item is None or item.status != "pending":
+                return
+            if m is not None:
+                item.measured_in = m.input_i
+                item._measurement = m
+                item._measured_target = target
+                item.measure_state = "measured"
+            else:
+                item.measure_state = "idle"
+        self._push_snapshot()
 
     def recover(self, path: str) -> bool:
         """Restore the pristine original at `path` from its backup, then
@@ -330,11 +395,16 @@ class JobQueue:
 
     def _process(self, item: _Item) -> None:
         target_lufs_used = self.target_lufs
+        # Reuse the measure-on-drop pass-1 result only if it was computed for
+        # the same target — loudnorm's offset is target-dependent.
+        with self._state_lock:
+            cached = item._measurement if item._measured_target == target_lufs_used else None
         try:
             result = normalizer.normalize_in_place(
                 item.path,
                 progress=self.callbacks.on_status,
                 target_lufs=target_lufs_used,
+                measurement=cached,
             )
             backup_path = str(normalizer.backup_path_for(item.path))
             processed_at = history.now_iso()

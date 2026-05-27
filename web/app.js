@@ -177,7 +177,13 @@
 
     if (status === "pending") {
       dotColor = THEME.textFaint;
-      detail = "Pending";
+      if (item.measure_state === "measuring") {
+        detail = "Analyzing…";
+      } else if (item.measured_in != null) {
+        detail = `${item.measured_in.toFixed(1)} LUFS`;
+      } else {
+        detail = "Pending";
+      }
     } else if (status === "processing") {
       dotColor = THEME.accent;
       pulsing = true;

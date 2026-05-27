@@ -95,6 +95,8 @@ python scripts/build_icon.py
 ## How processing works
 
 - User drags files onto the app window. A native AppKit drop handler in `src/webapp.py` captures the absolute paths (WKWebView's JS doesn't expose them) and pushes them into `JobQueue`. After it handles the drop, Python dispatches a `charlufs:drag_reset` event to clear the JS-side drag overlay (since WKWebView swallows the drop event before JS sees `drop`/`dragleave`).
+- **Measure on drop**: as soon as files are queued, `JobQueue` measures each one in the background (a `loudnorm` pass-1, capped at `parallelism` concurrent ffmpeg runs by a semaphore) and shows its current input level next to the row. The measurement is taken against the *source* `normalize_in_place` will use — the `CharBackup/` copy if one exists, else the file itself — so re-dropping an already-normalized file shows the original's level, not -16.
+- The pass-1 result is cached on the row along with the target it was computed for. At Start, the worker reuses it (skipping pass 1) **only if the target is unchanged**; `loudnorm`'s offset is target-dependent, so moving the slider after dropping invalidates the cache and triggers a fresh pass 1. The displayed input level stays valid regardless (it's target-independent).
 - User clicks **Start**. Up to N files are normalized in parallel — N defaults to `min(8, max(2, cpu_count // 2))`, which is 4 on an M3 base, 8 on M3 Max.
 - New files dropped while processing auto-join the running pool — free workers pick them up within ~100ms.
 - For each file, `normalize_in_place` either copies the current file into `CharBackup/` (first run) or treats the existing backup as the source of truth (re-run), processes from the backup, and atomic-replaces the file at the original path.

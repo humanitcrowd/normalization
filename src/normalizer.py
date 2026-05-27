@@ -224,14 +224,22 @@ def _log_ffmpeg_failure(stage: str, path: Path, stderr: str) -> None:
 def _run_normalization(input_path: Path, output_path: Path, ffmpeg: str,
                        display_name: str,
                        progress: ProgressCb | None,
-                       target_lufs: float) -> tuple[float | None, float | None]:
-    """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs)."""
+                       target_lufs: float,
+                       measurement: "Measurement | None" = None,
+                       ) -> tuple[float | None, float | None]:
+    """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs).
+
+    If `measurement` is supplied (e.g. a cached measure-on-drop result for the
+    same target), pass 1 is skipped and we go straight to applying it."""
     log = get_logger()
 
-    if progress:
-        progress(f"Measuring {display_name}")
-    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
-    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
+    if measurement is None:
+        if progress:
+            progress(f"Measuring {display_name}")
+        log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
+        measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
+    else:
+        log.info("Pass 1 reused from cached measurement: %s", display_name)
 
     if measurement is not None:
         if progress:
@@ -297,9 +305,19 @@ def backup_path_for(path: Path) -> Path:
     return path.parent / BACKUP_DIR_NAME / path.name
 
 
+def source_path_for(path: Path) -> Path:
+    """The file that normalize_in_place will actually read from: the pristine
+    backup if it already exists, otherwise the file itself. Used so the
+    measure-on-drop level reflects the true original, not an
+    already-normalized current file."""
+    backup = backup_path_for(path)
+    return backup if backup.exists() else path
+
+
 def normalize_in_place(path: Path, ffmpeg: str | None = None,
                        progress: ProgressCb | None = None,
-                       target_lufs: float = LUFS_TARGET) -> Result:
+                       target_lufs: float = LUFS_TARGET,
+                       measurement: "Measurement | None" = None) -> Result:
     """Normalize a file in place, preserving the pristine original in a sibling
     `CharBackup/` folder.
 
@@ -346,6 +364,7 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
     try:
         measured_in, measured_out = _run_normalization(
             backup, temp_path, ffmpeg, path.name, progress, target_lufs,
+            measurement=measurement,
         )
     except Exception:
         if temp_path.exists():

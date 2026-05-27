@@ -15,8 +15,8 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 
 1. Launch **CharLUFS**. The target slider always starts at **-16 LUFS** (standard podcast loudness). If you want something else, set it now.
 2. Pick your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file will be normalized to.
-3. **Drag one or more audio files anywhere onto the app window.** They show up in the Queue with the status "Pending".
-4. Click **Start**. CharLUFS processes files in parallel — on a modern Mac it'll burn through 4–8 files at once. Each row shows progress: Pending → Processing → Done.
+3. **Drag one or more audio files anywhere onto the app window.** Each row shows its current loudness next to it within a few seconds (e.g. `-22.3 LUFS`) so you can see what you're starting from before committing.
+4. Click **Start**. CharLUFS processes files in parallel — on a modern Mac it'll burn through 4–8 files at once. Each row shows progress: its measured level → Processing → Done.
 5. Each finished file is **rewritten in place** — same name, same folder. The original lands in a sibling folder called `CharBackup`. You'll see `CharBackup/episode42.wav` next to your `episode42.wav`.
 6. While files process, you can drop more — they auto-join the queue.
 
