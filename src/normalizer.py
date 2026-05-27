@@ -167,6 +167,39 @@ def measure(ffmpeg: str, input_path: Path,
     return _parse_loudnorm_json(proc.stderr)
 
 
+# ffmpeg's ebur128 filter is a faithful BS.1770 meter — it tracks dedicated
+# meters (RX, YouLean) more closely than loudnorm's readout, and it applies
+# the correct multichannel weighting (L/C/R at 0 dB, surrounds +1.5 dB, LFE
+# excluded) from the file's channel layout. We use it for the numbers we
+# *display*; loudnorm remains the engine that actually applies the gain.
+_EBUR128_I_RE = re.compile(r"\bI:\s*(-?\d+(?:\.\d+)?)\s*LUFS")
+_EBUR128_TP_RE = re.compile(r"\bPeak:\s*([+-]?\d+(?:\.\d+)?)\s*dBFS")
+
+
+def measure_loudness(input_path: Path,
+                     ffmpeg: str | None = None) -> tuple[float | None, float | None]:
+    """Measure integrated loudness and true peak with the ebur128 filter.
+
+    Returns (integrated_lufs, true_peak_dbtp); either may be None if the file
+    is silent or parsing fails. The filter prints running values per frame and
+    a final Summary block — we take the last match of each, which is the
+    summary figure.
+    """
+    ffmpeg = ffmpeg or find_ffmpeg()
+    cmd = [
+        ffmpeg, "-hide_banner", "-nostats", "-i", str(input_path),
+        "-af", "ebur128=peak=true", "-f", "null", "-",
+    ]
+    proc = _run(cmd)
+    i_matches = _EBUR128_I_RE.findall(proc.stderr)
+    tp_matches = _EBUR128_TP_RE.findall(proc.stderr)
+    integrated = float(i_matches[-1]) if i_matches else None
+    true_peak = float(tp_matches[-1]) if tp_matches else None
+    if integrated is None:
+        _log_ffmpeg_failure("ebur128", input_path, proc.stderr)
+    return integrated, true_peak
+
+
 def apply_two_pass(ffmpeg: str, input_path: Path, output_path: Path,
                    m: Measurement,
                    target_lufs: float = LUFS_TARGET) -> tuple[bool, str]:
@@ -225,21 +258,14 @@ def _run_normalization(input_path: Path, output_path: Path, ffmpeg: str,
                        display_name: str,
                        progress: ProgressCb | None,
                        target_lufs: float,
-                       measurement: "Measurement | None" = None,
                        ) -> tuple[float | None, float | None]:
-    """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs).
-
-    If `measurement` is supplied (e.g. a cached measure-on-drop result for the
-    same target), pass 1 is skipped and we go straight to applying it."""
+    """Two-pass normalize from input_path to output_path. Returns (in_lufs, out_lufs)."""
     log = get_logger()
 
-    if measurement is None:
-        if progress:
-            progress(f"Measuring {display_name}")
-        log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
-        measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
-    else:
-        log.info("Pass 1 reused from cached measurement: %s", display_name)
+    if progress:
+        progress(f"Measuring {display_name}")
+    log.info("Pass 1 (measure, target %.1f LUFS): %s", target_lufs, display_name)
+    measurement = measure(ffmpeg, input_path, target_lufs=target_lufs)
 
     if measurement is not None:
         if progress:
@@ -316,8 +342,7 @@ def source_path_for(path: Path) -> Path:
 
 def normalize_in_place(path: Path, ffmpeg: str | None = None,
                        progress: ProgressCb | None = None,
-                       target_lufs: float = LUFS_TARGET,
-                       measurement: "Measurement | None" = None) -> Result:
+                       target_lufs: float = LUFS_TARGET) -> Result:
     """Normalize a file in place, preserving the pristine original in a sibling
     `CharBackup/` folder.
 
@@ -364,7 +389,6 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
     try:
         measured_in, measured_out = _run_normalization(
             backup, temp_path, ffmpeg, path.name, progress, target_lufs,
-            measurement=measurement,
         )
     except Exception:
         if temp_path.exists():

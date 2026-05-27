@@ -55,11 +55,6 @@ class _Item:
     target_lufs_used: float | None = None
     # measure-on-drop: idle | measuring | measured. Not the same as `status`.
     measure_state: str = "idle"
-    # Cached pass-1 result + the target it was computed against. Reused at
-    # processing time to skip pass 1 when the target is unchanged. Never
-    # serialized to JS.
-    _measurement: object = None
-    _measured_target: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -157,13 +152,10 @@ class JobQueue:
                     added.append(p)
                 elif existing.status in ("done", "error"):
                     # Re-arm: keep historical fields, just flip status back
-                    # to pending so workers will pick it up. Drop the stale
-                    # measure cache so it gets re-analyzed against the source.
+                    # to pending so workers will pick it up, and re-analyze.
                     existing.status = "pending"
                     existing.error = None
                     existing.measure_state = "idle"
-                    existing._measurement = None
-                    existing._measured_target = None
                     added.append(p)
                 # If already pending/processing, leave alone.
         self._push_snapshot()
@@ -175,23 +167,22 @@ class JobQueue:
         return added
 
     def _measure_item(self, path: Path) -> None:
-        """Background measure-on-drop: compute the input LUFS of the source
-        (the pristine backup if one exists, else the file itself) and cache
-        the pass-1 result for reuse at processing time."""
+        """Background measure-on-drop: report the input loudness + true peak of
+        the source (the pristine backup if one exists, else the file itself)
+        using the ebur128 meter, so the UI shows accurate levels before Start."""
         key = str(path)
-        target = self.target_lufs
         with self._state_lock:
             item = next((it for it in self._items if str(it.path) == key), None)
             if item is None or item.status != "pending":
                 return
             if item.measure_state == "measuring":
                 return
-            if item._measurement is not None and item._measured_target == target:
-                return  # already measured for this target
+            if item.measure_state == "measured" and item.measured_in is not None:
+                return  # already measured
             item.measure_state = "measuring"
         self._push_snapshot()
 
-        m = None
+        integrated = true_peak = None
         with self._measure_sem:
             # Bail if the item got picked up for processing while we waited.
             with self._state_lock:
@@ -200,9 +191,8 @@ class JobQueue:
                 if item is None or item.status != "pending":
                     return
             try:
-                ffmpeg = normalizer.find_ffmpeg()
                 src = normalizer.source_path_for(path)
-                m = normalizer.measure(ffmpeg, src, target_lufs=target)
+                integrated, true_peak = normalizer.measure_loudness(src)
             except Exception:
                 get_logger().exception("measure-on-drop failed for %s", path.name)
 
@@ -210,11 +200,9 @@ class JobQueue:
             item = next((it for it in self._items if str(it.path) == key), None)
             if item is None or item.status != "pending":
                 return
-            if m is not None:
-                item.measured_in = m.input_i
-                item.measured_tp = m.input_tp
-                item._measurement = m
-                item._measured_target = target
+            if integrated is not None:
+                item.measured_in = integrated
+                item.measured_tp = true_peak
                 item.measure_state = "measured"
             else:
                 item.measure_state = "idle"
@@ -398,23 +386,30 @@ class JobQueue:
 
     def _process(self, item: _Item) -> None:
         target_lufs_used = self.target_lufs
-        # Reuse the measure-on-drop pass-1 result only if it was computed for
-        # the same target — loudnorm's offset is target-dependent.
-        with self._state_lock:
-            cached = item._measurement if item._measured_target == target_lufs_used else None
         try:
             result = normalizer.normalize_in_place(
                 item.path,
                 progress=self.callbacks.on_status,
                 target_lufs=target_lufs_used,
-                measurement=cached,
             )
+            # Report the achieved output level with the ebur128 meter so the
+            # 'Done' number matches dedicated meters. Fall back to loudnorm's
+            # self-reported value if the meter pass fails.
+            out_lufs = result.measured_out
+            try:
+                eb_out, _ = normalizer.measure_loudness(result.output_path)
+                if eb_out is not None:
+                    out_lufs = eb_out
+            except Exception:
+                get_logger().exception("output ebur128 measure failed")
+            # Keep the accurate measure-on-drop input level if we have it.
+            in_lufs = item.measured_in if item.measured_in is not None else result.measured_in
             backup_path = str(normalizer.backup_path_for(item.path))
             processed_at = history.now_iso()
             with self._state_lock:
                 item.status = "done"
-                item.measured_in = result.measured_in
-                item.measured_out = result.measured_out
+                item.measured_in = in_lufs
+                item.measured_out = out_lufs
                 item.output_name = result.output_path.name
                 item.backup_path = backup_path
                 item.processed_at = processed_at
@@ -427,8 +422,8 @@ class JobQueue:
                     backup_path=backup_path,
                     processed_at=processed_at,
                     target_lufs=target_lufs_used,
-                    measured_in=result.measured_in,
-                    measured_out=result.measured_out,
+                    measured_in=in_lufs,
+                    measured_out=out_lufs,
                 ))
             except Exception:
                 get_logger().exception("history.upsert failed")
