@@ -14,7 +14,8 @@ This repo is the source. The shipped artifact is a notarized `.zip` containing a
 │   ├── webapp.py          # pywebview UI — drives the React frontend, installs
 │   │                      #   the native AppKit drag handler
 │   ├── jobqueue.py        # parallel job queue (drives normalize_in_place)
-│   ├── normalizer.py      # ffmpeg two-pass loudnorm + in-place + backup logic
+│   ├── normalizer.py      # ebur128 metering + linear-gain in-place normalize
+│   │                      #   + CharBackup logic (legacy loudnorm path kept for tests)
 │   ├── config.py          # ~/Library/Application Support/CharLUFS/config.json
 │   ├── log.py             # rotating file log + in-app ring buffer
 │   ├── watcher.py         # DEPRECATED — old folder-watcher mode, kept only
