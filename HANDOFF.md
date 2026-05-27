@@ -15,7 +15,7 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 
 1. Launch **CharLUFS**. The target slider always starts at **-16 LUFS** (standard podcast loudness). If you want something else, set it now.
 2. Pick your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file will be normalized to.
-3. **Drag one or more audio files anywhere onto the app window.** Each row shows its current loudness next to it within a few seconds (e.g. `-22.3 LUFS`) so you can see what you're starting from before committing.
+3. **Drag one or more audio files anywhere onto the app window.** Within a few seconds each row shows its current loudness and true peak (e.g. `-22.3 LUFS · -6.1 dBTP`) so you can see what you're starting from before committing. A true peak hotter than -1.0 dBTP is flagged in red.
 4. Click **Start**. CharLUFS processes files in parallel — on a modern Mac it'll burn through 4–8 files at once. Each row shows progress: its measured level → Processing → Done.
 5. Each finished file is **rewritten in place** — same name, same folder. The original lands in a sibling folder called `CharBackup`. You'll see `CharBackup/episode42.wav` next to your `episode42.wav`.
 6. While files process, you can drop more — they auto-join the queue.
@@ -60,3 +60,4 @@ That's enough for me to figure out what happened.
 - **The Recover button is your safety net.** Click it any time you want the original back. The `CharBackup` folder is never automatically cleaned up by CharLUFS.
 - **If you drop a really big file from a slow drive (Dropbox, network), wait for it to fully sync before clicking Start.** The app processes whatever's on disk.
 - **The app doesn't run in the background.** Quit it when you don't need it; relaunch when you do. No menu-bar daemons, no startup items.
+- **Loudness numbers may differ by ~0.1–0.3 from another meter** (RX, YouLean, Ozone). That's normal — true peak especially is an *estimate* of the level between samples, and every meter reconstructs it a little differently, more so on sharp/transient material. CharLUFS measures with the same EBU R128 standard they do; small disagreements aren't errors.
