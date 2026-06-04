@@ -1,6 +1,6 @@
 # CharLUFS — How to Use
 
-A small Mac app that takes any audio file you drag onto it and rewrites it at your target loudness. By default it aims at standard podcast loudness (-16 LUFS), but you can drag the slider to anything from quiet broadcast (-23) to loud-as-fuck (-8). It only ever applies a **clean volume change — no compression or limiting, ever** — held just under a true-peak ceiling you can set. The pristine original is **always** preserved in a `CharBackup/` folder next to your file, so you can revert any normalization with a single click.
+A small Mac app that takes any audio file you drag onto it and rewrites it at your target loudness. By default it aims at standard podcast loudness (-16 LUFS), but you can drag the slider to anything from quiet broadcast (-23) to loud-as-fuck (-8). It uses a clean volume change whenever it can, and falls back to transparent look-ahead peak limiting only when needed to reach your target without blowing past the true-peak ceiling you set. The pristine original is **always** preserved in a `CharBackup/` folder next to your file, so you can revert any normalization with a single click.
 
 You install it once. You run it whenever you want to normalize files. Quit when you're done.
 
@@ -14,9 +14,9 @@ You install it once. You run it whenever you want to normalize files. Quit when 
 ## Use it
 
 1. Launch **CharLUFS**. The target slider always starts at **-16 LUFS** (standard podcast loudness). If you want something else, set it now.
-2. Pick your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file aims for. Below it, the **True peak ceiling** stepper sets the hard peak limit (default -1.5 dBTP) — CharLUFS will never push a file past it. (This ceiling sticks between launches; the loudness slider resets to -16.)
+2. Pick your target loudness with the slider or one of the preset labels (EBU R128, Audible, Podcast, Spotify, Loud, Loud as fuck). The big number is what every file aims for. Below it, the **True peak ceiling** stepper sets the hard peak limit (default -1.5 dBTP). (This ceiling sticks between launches; the loudness slider resets to -16.)
 
-   **No compression, ever.** CharLUFS only applies a clean volume change. If a file is so peaky that reaching your loudness target would push it past the ceiling, it stops at the ceiling and lands a touch quieter than target instead of squashing the audio. You'll see that as a "Done" level slightly above your target.
+   **How it processes.** It's a clean volume change whenever it can be. If a file has isolated transient peaks (mouth clicks, plosives, hard attacks) that would otherwise prevent it from reaching your loudness target without blowing past the ceiling, CharLUFS applies *transparent look-ahead peak limiting* — it shaves only those tiny single-sample spikes so the rest of the audio can ride up to target. The body of the dialogue/music is untouched.
 3. **Drag one or more audio files anywhere onto the app window.** Within a few seconds each row shows its current loudness and true peak (e.g. `-22.3 LUFS · -6.1 dBTP`) so you can see what you're starting from before committing. A true peak hotter than -1.0 dBTP is flagged in red.
 4. Click **Start**. CharLUFS processes files in parallel — on a modern Mac it'll burn through 4–8 files at once. Each row shows progress: its measured level → Processing → Done.
 5. Each finished file is **rewritten in place** — same name, same folder. The original lands in a sibling folder called `CharBackup`. You'll see `CharBackup/episode42.wav` next to your `episode42.wav`.

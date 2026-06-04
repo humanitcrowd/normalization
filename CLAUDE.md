@@ -10,11 +10,13 @@ reasoning behind it**, the non-obvious gotchas, and how to build/ship it.
 
 A small **macOS desktop app** that loudness-normalizes audio files. The user
 drags one or more audio files onto the window, picks a target loudness, clicks
-**Start**, and each file is rewritten **in place** at that loudness using a
-**single linear gain — no compression or limiting, ever** — held under an
-adjustable true-peak ceiling. The pristine original of every file is preserved
-in a sibling `CharBackup/` folder, and any file can be reverted with a
-**Recover** button.
+**Start**, and each file is rewritten **in place** at that loudness. Engine is
+**loudnorm two-pass in `linear=true` mode** — pure linear gain whenever the
+target is reachable under the (adjustable) true-peak ceiling, with transparent
+look-ahead peak limiting as a fallback only when it isn't. (See §4 for the
+1.3→1.4 history on why we don't ship the strict no-compression path.) The
+pristine original is preserved in a sibling `CharBackup/` folder, and any file
+can be reverted with a **Recover** button.
 
 Target users: audio producers (podcast/broadcast/ad mastering). No terminal,
 no Python install — it ships as a self-contained signed `.app`.
@@ -48,12 +50,18 @@ src/__main__.py (dev entry)  ───┴─> src/webapp.py : WebApp.run()
   background **measure-on-drop** threads; `start()` spins up N workers;
   `_process()` runs the normalizer; `recover()` restores from backup;
   history is seeded on construction so past jobs reappear as `done` rows.
-- **src/normalizer.py** — two paths:
-  - **App path**: `measure_loudness()` (ebur128) + `apply_linear_gain()`
-    (volume filter), orchestrated by `normalize_in_place()`.
-  - **Legacy path (tests only)**: `measure()` + `apply_two_pass()`/
-    `apply_single_pass()` (loudnorm) via `normalize()` → writes a
-    `_normalized` sibling. NOT used by the app.
+- **src/normalizer.py** — both an in-place path (used by the app) and a
+  legacy sibling-output path (used by tests):
+  - **In-place path**: `normalize_in_place()` runs loudnorm two-pass via
+    `_run_normalization()` → `measure()` (pass 1) + `apply_two_pass()`
+    (pass 2, `linear=true` with dynamic fallback). No `-ar` so the source
+    sample rate is preserved.
+  - **ebur128 path**: `measure_loudness()` is the BS.1770 meter we use for
+    every number we *display* — input loudness + true peak on drop, and a
+    re-measure of the output for the done-row level. Distinct from
+    loudnorm's own readouts (which are slightly looser).
+  - **Legacy `normalize()`**: writes a `_normalized` sibling. Used by
+    `tests/`. Forces 48 kHz (`-ar`) and is NOT exercised by the app.
 - **src/history.py** — `processed.json` persistence (list of entries) powering
   Recover across launches.
 - **src/config.py** — `Config(target_lufs, true_peak, watch_folder)`. `load()`
@@ -87,19 +95,25 @@ Runtime locations:
 4. **Recover** = delete current file, copy backup back over it, drop the history
    entry. Backups are never auto-removed (Clear and the per-row × only forget
    the in-app entry, not the on-disk backup).
-5. **Pure linear gain — NO compression, ever** (the headline guarantee, v1.3.0).
-   `gain = min(target_lufs − measured_LUFS, true_peak_ceiling − measured_TP)`,
-   applied with the `volume` filter. Loudness and true peak both scale exactly
-   with a linear gain, so the output is **mathematically guaranteed** never to
-   exceed the ceiling. A peaky source that can't reach the loudness target
-   without breaching the ceiling lands a little **quieter** rather than being
-   limited. **Why we dropped loudnorm from the app path:** loudnorm's
-   `linear=true` mode *silently reverts to dynamic (limiting)* when it can't hit
-   target under the TP ceiling — exactly the compression we must avoid.
-6. **Sample rate preserved in == out** (no resample on the output path).
-   Resampling shifts inter-sample peaks (breaking the exact TP guarantee) and is
-   itself an "audio change" we don't want. (Only the legacy loudnorm path still
-   forces 48k.)
+5. **Engine = loudnorm two-pass `linear=true`, with dynamic fallback** (v1.4.0,
+   the current state after a one-version detour through purist linear-only).
+   Pass 1 measures; pass 2 applies a single linear gain when the target is
+   reachable under the true-peak ceiling, and silently reverts to dynamic
+   mode (look-ahead peak limiting) when it isn't. We made the decision
+   **deliberately** after 1.3.0 shipped pure-linear-only and we got a real
+   dialogue test back: raw dialogue has 20–26 dB crest factor (mouth clicks,
+   plosives), so pure linear gain can only push it 0.5–4 dB before hitting
+   the TP ceiling — files would land 5–10 dB short of target, which broke
+   the primary podcast workflow. loudnorm's dynamic fallback shaves single-
+   sample transient peaks transparently so the body of the dialogue can ride
+   up to target. We accept that *some* limiting can occur on peaky material;
+   it's the right trade for a tool whose primary user normalizes raw
+   dialogue. If you want strict linear-only later, expose it as a mode
+   toggle rather than make it the default.
+6. **Sample rate preserved in == out** on the app path (no `-ar` in
+   `apply_two_pass`/`apply_single_pass` when called via `normalize_in_place`,
+   which passes `sample_rate=None`). The legacy `normalize()` keeps the
+   default 48 kHz for the tests.
 7. **ebur128 for all displayed/decision numbers**, not loudnorm's readout.
    ebur128 is a faithful BS.1770 meter — tracks RX/YouLean within ~0.1 LU and
    applies correct multichannel weighting (L/C/R 0 dB, surrounds +1.5 dB, LFE
@@ -199,5 +213,12 @@ Dev run (no build): `python -m src`.
 - **1.1.0** — pywebview UI redesign + icon.
 - **1.2.0** — drag-and-drop replaces watch-folder; in-place rewrite + CharBackup
   + Recover; parallel queue; measure-on-drop; ebur128 for displayed numbers.
-- **1.3.0** — pure linear-gain normalization (no compression); adjustable,
-  persisted true-peak ceiling; sample rate preserved in == out.
+- **1.3.0** — *(superseded)* pure linear-gain normalization (volume filter),
+  with the gain hard-capped at the TP headroom; adjustable, persisted
+  true-peak ceiling; sample rate preserved. Worked beautifully for music
+  masters; broke for raw dialogue (see §4.5).
+- **1.4.0** — reverted normalization engine to **loudnorm two-pass linear**
+  (with its dynamic fallback for peaky material) while keeping every 1.3.0
+  gain *outside* the engine: ebur128 for displayed numbers, adjustable
+  persisted TP ceiling, sample-rate preservation. This is the version
+  shipped to the real producer workflow.
