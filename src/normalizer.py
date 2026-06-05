@@ -1,9 +1,22 @@
 """EBU R128 loudness normalization via ffmpeg.
 
-The in-place path (`normalize_in_place`, used by the app) applies a single
-linear gain measured with the ebur128 meter — no compression or limiting.
-The legacy `normalize` (`_normalized` sibling output, used by tests) still
-uses loudnorm's two-pass.
+Two normalization paths share this module:
+
+  * `normalize_in_place` — the path the app uses. Runs ffmpeg's `loudnorm`
+    two-pass in `linear=true` mode against the file's CharBackup copy and
+    atomic-replaces the file. Linear gain when the target is reachable
+    under the true-peak ceiling; loudnorm transparently falls back to
+    dynamic mode (look-ahead peak limiting) only when it isn't. Sample
+    rate is preserved.
+
+  * `normalize` — legacy sibling-output (`<stem>_normalized<ext>`),
+    exercised by `tests/` only. Same loudnorm two-pass, but forces 48 kHz
+    output.
+
+Separately, `measure_loudness` (an ebur128 wrapper) is used for the
+*displayed* input/output levels — it tracks dedicated meters (RX,
+YouLean) more closely than loudnorm's readout and applies correct
+multichannel weighting per BS.1770.
 """
 from __future__ import annotations
 
