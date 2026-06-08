@@ -327,6 +327,7 @@
     const [log, setLog] = useState([]);
     const [dragOver, setDragOver] = useState(false);
     const [copyFlash, setCopyFlash] = useState(false);
+    const [version, setVersion] = useState("");
     const dragCounter = useRef(0);
     const logRef = useRef(null);
 
@@ -337,6 +338,7 @@
         try {
           const state = await window.pywebview.api.get_initial_state();
           if (cancelled) return;
+          if (typeof state.version === "string") setVersion(state.version);
           if (typeof state.target_lufs === "number") setLufs(state.target_lufs);
           if (typeof state.true_peak === "number") setTruePeak(state.true_peak);
           if (Array.isArray(state.queue)) setQueue(state.queue);
@@ -430,7 +432,10 @@
       }
     }
     async function onCopyLog() {
-      const text = log.map((l) => `${l.ts}  ${l.text}`).join("\n");
+      const header = version
+        ? `CharLUFS v${version}  (copied ${new Date().toISOString()})\n`
+        : "";
+      const text = header + log.map((l) => `${l.ts}  ${l.text}`).join("\n");
       try {
         await navigator.clipboard.writeText(text);
       } catch (e) {
@@ -753,7 +758,17 @@
               alignItems: "baseline", marginBottom: 4,
             },
           },
-            h(SectionLabel, null, "Log"),
+            h("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
+              h(SectionLabel, null, "Log"),
+              version && h("span", {
+                title: "App version (included when you Copy log)",
+                style: {
+                  fontSize: 10, color: THEME.textFaint, fontWeight: 500,
+                  fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+                  letterSpacing: 0.2,
+                },
+              }, `v${version}`)
+            ),
             h("button", {
               onClick: onCopyLog,
               style: {

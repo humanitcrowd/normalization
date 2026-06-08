@@ -23,10 +23,11 @@ from pathlib import Path
 
 import webview
 
+from . import __version__
 from . import config as cfg
 from . import normalizer
 from .jobqueue import JobQueue, QueueCallbacks
-from .log import get_store
+from .log import get_logger, get_store
 
 
 log = logging.getLogger("charlufs.webapp")
@@ -62,6 +63,7 @@ class Api:
     def get_initial_state(self) -> dict:
         snapshot = get_store().snapshot(80)
         return {
+            "version": __version__,
             "target_lufs": self._app.config.target_lufs,
             "true_peak": self._app.config.true_peak,
             "log": list(snapshot),
@@ -288,6 +290,10 @@ class WebApp:
         # Wire log -> JS push. We attach the listener BEFORE creating the
         # window so backlogged messages don't get lost.
         get_store().set_listener(lambda line: self.push("log", line))
+
+        # First line in every session's log buffer is the version, so a
+        # copy-log paste always identifies which build produced it.
+        get_logger().info("CharLUFS v%s starting", __version__)
 
         self.window = webview.create_window(
             "CharLUFS",
