@@ -173,6 +173,31 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     )
 
 
+_PROBE_SR_RE = re.compile(r"Audio:.+?(\d+)\s*Hz", re.IGNORECASE)
+
+
+def probe_sample_rate(ffmpeg: str, input_path: Path) -> int | None:
+    """Detect a file's audio sample rate by running ffmpeg with no output.
+
+    ffmpeg exits non-zero (no output file specified) but writes stream
+    metadata to stderr; we parse the Hz value. None if it can't be parsed.
+
+    Why we need this: ffmpeg's `loudnorm` filter internally upsamples to 4×
+    the input rate (for BS.1770 true-peak measurement) and — critically —
+    keeps that 4× rate as the filter's *output* stream rate. Without an
+    explicit `-ar` on the apply command, that 4× rate (e.g. 192 kHz for a
+    48 kHz source) leaks straight into the output file. Logic Pro and other
+    DAW sessions that reference sample positions in the file break
+    catastrophically when the SR silently quadruples. To keep output SR ==
+    input SR we have to probe the source rate and pass it to apply_* as
+    `sample_rate=<source>`, which inserts an aresample at the end of the
+    chain to downsample loudnorm's 192k back to the original rate.
+    """
+    proc = _run([ffmpeg, "-hide_banner", "-i", str(input_path)])
+    m = _PROBE_SR_RE.search(proc.stderr)
+    return int(m.group(1)) if m else None
+
+
 def measure(ffmpeg: str, input_path: Path,
             target_lufs: float = LUFS_TARGET,
             true_peak: float = TRUE_PEAK) -> Measurement | None:
@@ -426,9 +451,15 @@ def normalize_in_place(path: Path, ffmpeg: str | None = None,
         temp_path.unlink()
 
     try:
+        # Probe the source SR and force the output back to it. Without this,
+        # loudnorm's internal 4x oversample (used for true-peak measurement)
+        # leaks into the output stream — a 48 kHz source comes out at 192 kHz
+        # with 4x the sample count, breaking every DAW session that
+        # references sample positions in the file.
+        source_sr = probe_sample_rate(ffmpeg, backup) or SAMPLE_RATE
         measured_in, measured_out = _run_normalization(
             backup, temp_path, ffmpeg, path.name, progress, target_lufs,
-            true_peak=true_peak, sample_rate=None,
+            true_peak=true_peak, sample_rate=source_sr,
         )
     except Exception:
         if temp_path.exists():
