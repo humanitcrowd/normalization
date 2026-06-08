@@ -110,10 +110,13 @@ Runtime locations:
    it's the right trade for a tool whose primary user normalizes raw
    dialogue. If you want strict linear-only later, expose it as a mode
    toggle rather than make it the default.
-6. **Sample rate preserved in == out** on the app path (no `-ar` in
-   `apply_two_pass`/`apply_single_pass` when called via `normalize_in_place`,
-   which passes `sample_rate=None`). The legacy `normalize()` keeps the
-   default 48 kHz for the tests.
+6. **Sample rate preserved in == out** on the app path, but the
+   implementation is *not* "omit `-ar`" — see §5. `normalize_in_place()`
+   probes the source rate with `probe_sample_rate()` and passes it as
+   `sample_rate=<source>` to `apply_two_pass`, which appends `-ar <source>`.
+   That explicit `-ar` is what downsamples loudnorm's internal 4× rate back
+   to the source rate; without it the WAV comes out at 4× and DAW sessions
+   break. The legacy `normalize()` keeps the default 48 kHz for the tests.
 7. **ebur128 for all displayed/decision numbers**, not loudnorm's readout.
    ebur128 is a faithful BS.1770 meter — tracks RX/YouLean within ~0.1 LU and
    applies correct multichannel weighting (L/C/R 0 dB, surrounds +1.5 dB, LFE
@@ -134,9 +137,24 @@ Runtime locations:
 
 ## 5. Non-obvious gotchas (things that cost us time)
 
-- **Don't draw a fake window inside the OS window.** An early build rendered its
-  own titlebar + traffic lights inside the WKWebView → "window-in-window" look.
-  Let the OS window be the window; fill `100vw/100vh`.
+- **ffmpeg `loudnorm` silently quadruples the output sample rate.** This is the
+  most expensive lesson in the project. `loudnorm` internally upsamples to 4×
+  the input rate for BS.1770 true-peak measurement and — critically — keeps
+  that 4× rate as the filter's *output* stream rate. A 48 kHz source comes out
+  at **192 kHz** with 4× the sample count if you don't explicitly downsample.
+  The 4× WAV is technically valid audio, but every DAW session referencing
+  sample positions in the file breaks catastrophically (Logic regions play the
+  wrong slice — what looks like "truncated tracks and messed up edits"). The
+  fix is to probe the source rate (`probe_sample_rate()` in `normalizer.py`,
+  which runs `ffmpeg -i <file>` and parses `…Hz` out of stderr) and pass it as
+  `sample_rate=` to `apply_two_pass`, which appends `-ar <source_sr>` and
+  inserts an `aresample` at the end of the chain to downsample loudnorm's 4×
+  back to source. **Never drop `-ar` from a `loudnorm` apply command thinking
+  you're "preserving source SR" — you're doing the opposite.** This is the
+  v1.3.0→v1.4.1 chain of pain.
+- **Don't draw a fake window inside the OS window.** An early build rendered
+  its own titlebar + traffic lights inside the WKWebView → "window-in-window"
+  look. Let the OS window be the window; fill `100vw/100vh`.
 - **True peak is an oversampled *estimate*, not a measured sample.** BS.1770
   mandates ≥4× oversampling; ffmpeg/RX/Ozone/YouLean each reconstruct slightly
   differently, so TP readings legitimately differ **0.1–0.3 dB** between meters,
@@ -220,5 +238,11 @@ Dev run (no build): `python -m src`.
 - **1.4.0** — reverted normalization engine to **loudnorm two-pass linear**
   (with its dynamic fallback for peaky material) while keeping every 1.3.0
   gain *outside* the engine: ebur128 for displayed numbers, adjustable
-  persisted TP ceiling, sample-rate preservation. This is the version
-  shipped to the real producer workflow.
+  persisted TP ceiling, sample-rate "preservation" (by omitting `-ar`).
+  Shipped, then broke the user's Logic sessions because of §5's loudnorm
+  4× SR leak.
+- **1.4.1** — **bugfix.** Probe the source sample rate with `ffmpeg -i` and
+  explicitly pass it as `-ar <source_sr>` on the apply command so loudnorm's
+  internal 4× rate gets downsampled back at the end of the chain. Output SR
+  now genuinely matches input SR (48k→48k, 96k→96k, 192k→192k, etc.) and
+  DAW sessions stay intact. This is the shipped version.
